@@ -97,10 +97,13 @@ def score_mad(df: pd.DataFrame,
     # Avoid division by zero for constant features
     mad = np.where(mad == 0, 1e-6, mad)
 
-    modified_z = 0.6745 * abs_dev / mad
+    # Only score features where MAD > 0; zero-MAD (constant) features carry no signal
+    valid = mad > 0
+    modified_z = np.zeros_like(abs_dev)
+    modified_z[:, valid] = 0.6745 * abs_dev[:, valid] / mad[valid]
 
-    # Score = worst-case deviation across all features
-    raw_scores = modified_z.max(axis=1)
+    # Score = worst-case deviation across all valid features
+    raw_scores = modified_z[:, valid].max(axis=1)
 
     score_min, score_max = raw_scores.min(), raw_scores.max()
     df["anomaly_score_mad"] = raw_scores
