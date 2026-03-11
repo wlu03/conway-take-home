@@ -1,5 +1,7 @@
+import joblib
 import numpy as np
 import pandas as pd
+from pathlib import Path
 from sklearn.covariance import MinCovDet
 from sklearn.ensemble import IsolationForest
 from sklearn.preprocessing import StandardScaler
@@ -17,6 +19,13 @@ METRIC_FEATURES = [
     "just_below_10k",
     "below_10k_margin",
     "sender_unique_receiver_countries",
+    # graph-level features (cycle and scatter-gather detection)
+    "in_any_cycle",
+    "min_cycle_len",
+    "scatter_source_count",
+    "gather_target_count",
+    "scatter_gather_score",
+    "shared_counterparty_count",
 ]
 
 ## Score each transaction with Isolation Forest
@@ -65,7 +74,7 @@ def score_mad(df: pd.DataFrame,
     features: list = METRIC_FEATURES,
 ) -> pd.DataFrame:
     """
-    MAD (Median Absolute Deviation) scoring — univariate, per feature.
+    MAD scoring: univariate, per feature.
 
     For each feature independently:
       MAD = median(|x - median(x)|)
@@ -77,10 +86,6 @@ def score_mad(df: pd.DataFrame,
     The final anomaly_score_mad is the maximum modified Z-score across
     all features for each transaction. A point is anomalous if it is
     an outlier in ANY single feature dimension.
-
-    Limitation: MAD is univariate. it cannot detect anomalies that only
-    appear when multiple features are considered together. Use MCD or
-    Isolation Forest for multivariate detection.
     """
     X = df[features].copy().fillna(df[features].median())
     X_vals = X.values.astype(np.float64)
@@ -105,7 +110,8 @@ def score_mad(df: pd.DataFrame,
     for p in [90, 95, 99, 99.5, 99.9]:
         print(f"  {p}th: {np.percentile(raw_scores, p):.4f}")
 
-    return df
+    mad_params = {"medians": medians, "mads": mad}
+    return df, mad_params
 
 
 def score_mcd(
@@ -116,7 +122,7 @@ def score_mcd(
     sample_size: int = 10_000,
 ) -> tuple[pd.DataFrame, MinCovDet]:
     """
-    MCD (Minimum Covariance Determinant) scoring, multivariate.
+    MCD: scoring, multivariate.
 
     MCD finds the subset of support_fraction * n observations whose
     covariance matrix has the smallest determinant (the 'tightest' cluster
@@ -124,25 +130,14 @@ def score_mcd(
     subset and scores all points by their Mahalanobis distance from the
     robust centroid.
 
-    Mahalanobis distance accounts for feature correlations — a point that
+    Mahalanobis distance accounts for feature correlations, a point that
     is 2 standard deviations out on each of two correlated features is less
     anomalous than one that is 2 standard deviations out on two independent
     features. This is the key advantage over MAD.
-
-    Limitation: MCD assumes the inlier population forms a single ellipsoidal
-    cluster (i.e., roughly multivariate Gaussian). For SAML-D, the inlier
-    population is multimodal (cash deposits, wires, cheques each have different
-    distributions), so MCD will misfit. Isolation Forest handles this better.
-
-    FastMCD is O(n * p^2) where p is the number of features. At 9.5M rows
-    this is infeasible, so we fit on a subsample and score the full dataset.
-    support_fraction=0.95 means MCD fits to the 95% of points that form the
-    most compact cluster, treating the other 5% as potential outliers during
-    fitting.
     """
     X = df[features].copy().fillna(df[features].median())
 
-    # MCD is expensive — fit on a representative subsample
+    # MCD is expensive thus fit on a representative subsample
     sample_idx = np.random.default_rng(random_state).choice(len(X), size=min(sample_size, len(X)), replace=False)
     X_sample = X.iloc[sample_idx].values.astype(np.float64)
 
@@ -163,6 +158,104 @@ def score_mcd(
         print(f"  {p}th: {np.percentile(raw_scores, p):.4f}")
 
     return df, mcd
+
+
+def save_models(
+    path: str,
+    clf: IsolationForest,
+    scaler: StandardScaler,
+    mcd: MinCovDet,
+    mad_params: dict,
+    cutoff: float,
+    features: list,
+) -> None:
+    """
+    Persist all trained scoring objects to disk so they can be reloaded
+    for inference on a new CSV without retraining.
+
+    Saves:
+      clf         — fitted IsolationForest
+      scaler      — fitted StandardScaler (must be applied before clf)
+      mcd         — fitted MinCovDet
+      mad_params  — dict with 'medians' and 'mads' arrays from score_mad
+      cutoff      — anomaly_score threshold from classify_transactions
+      features    — ordered list of feature column names the models expect
+    """
+    out = Path(path)
+    out.mkdir(parents=True, exist_ok=True)
+    joblib.dump(clf,        out / "isolation_forest.joblib")
+    joblib.dump(scaler,     out / "scaler.joblib")
+    joblib.dump(mcd,        out / "mcd.joblib")
+    joblib.dump(mad_params, out / "mad_params.joblib")
+    joblib.dump({"cutoff": cutoff, "features": features}, out / "meta.joblib")
+    print(f"Models saved to {out}/")
+
+
+def load_models(path: str) -> dict:
+    """
+    Load all trained scoring objects from disk.
+    Returns a dict with keys: clf, scaler, mcd, mad_params, cutoff, features.
+    """
+    out = Path(path)
+    meta = joblib.load(out / "meta.joblib")
+    return {
+        "clf":        joblib.load(out / "isolation_forest.joblib"),
+        "scaler":     joblib.load(out / "scaler.joblib"),
+        "mcd":        joblib.load(out / "mcd.joblib"),
+        "mad_params": joblib.load(out / "mad_params.joblib"),
+        "cutoff":     meta["cutoff"],
+        "features":   meta["features"],
+    }
+
+
+def apply_scores(
+    df: pd.DataFrame,
+    clf: IsolationForest,
+    scaler: StandardScaler,
+    mcd: MinCovDet,
+    mad_params: dict,
+    features: list,
+    cutoff: float,
+) -> pd.DataFrame:
+    """
+    Apply pre-trained models to a new dataframe for inference.
+
+    Adds the same score columns as the training functions:
+      anomaly_score, anomaly_score_normalized
+      anomaly_score_mad, anomaly_score_mad_normalized
+      anomaly_score_mcd, anomaly_score_mcd_normalized
+      is_anomalous  (1 if anomaly_score >= cutoff, else 0)
+    """
+    X = df[features].copy().fillna(df[features].median())
+
+    # Isolation Forest
+    X_scaled = scaler.transform(X)
+    df["anomaly_score"] = -clf.score_samples(X_scaled)
+    score_min = df["anomaly_score"].min()
+    score_max = df["anomaly_score"].max()
+    df["anomaly_score_normalized"] = (df["anomaly_score"] - score_min) / (score_max - score_min)
+
+    # MAD: apply stored medians and MADs from training data
+    X_vals = X.values.astype(np.float64)
+    medians = mad_params["medians"]
+    mads    = mad_params["mads"]
+    modified_z = 0.6745 * np.abs(X_vals - medians) / mads
+    raw_mad = modified_z.max(axis=1)
+    df["anomaly_score_mad"] = raw_mad
+    df["anomaly_score_mad_normalized"] = (raw_mad - raw_mad.min()) / (raw_mad.max() - raw_mad.min())
+
+    # MCD
+    raw_mcd = mcd.mahalanobis(X.values.astype(np.float64))
+    df["anomaly_score_mcd"] = raw_mcd
+    df["anomaly_score_mcd_normalized"] = (raw_mcd - raw_mcd.min()) / (raw_mcd.max() - raw_mcd.min())
+
+    # Classify using the stored cutoff from training
+    df["is_anomalous"] = (df["anomaly_score"] >= cutoff).astype("int8")
+    print(
+        f"Inference complete | {df['is_anomalous'].sum():,} flagged "
+        f"({df['is_anomalous'].mean() * 100:.3f}% of {len(df):,})"
+    )
+    return df
 
 
 def score_in_chunks(df: pd.DataFrame, features: list = METRIC_FEATURES, chunk_size: int = 500_000, random_state: int = 42,) -> tuple[pd.DataFrame, IsolationForest, StandardScaler]:
