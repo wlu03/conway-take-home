@@ -36,6 +36,14 @@ FATF_Grey_List_February_2026 = {
 def add_transaction_features(df: pd.DataFrame) -> pd.DataFrame:
 
     df = df.copy()
+    # ensure there is a datetime column for time‑based features; some datasets
+    # store date/time separately, so combine them if necessary
+    if "DateTime" not in df.columns:
+        if "Date" in df.columns and "Time" in df.columns:
+            df["DateTime"] = pd.to_datetime(df["Date"].astype(str) + " " + df["Time"].astype(str))
+        else:
+            raise KeyError("DataFrame must contain a 'DateTime' column or both 'Date' and 'Time' to construct one")
+
     ## currency features
     df["log_amount"] = np.log1p(df["Amount"].astype("float64")) 
     df["is_currency_conversion"] = (df["Payment_currency"] != df["Received_currency"]).astype("int8")

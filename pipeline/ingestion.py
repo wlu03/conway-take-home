@@ -19,8 +19,3 @@ def load_data(path: str) -> pd.DataFrame:
     df['Time'] = pd.to_timedelta(df['Time']) 
     df['DateTime'] = df['Date'] + df['Time']
     return df
-
-def add_transaction_features(df: pd.DataFrame) -> pd.DataFrame:
-    """
-    For each transaction, numeric 
-    """
