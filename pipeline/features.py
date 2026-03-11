@@ -145,10 +145,20 @@ FEATURE_COLS = [
     "sender_unique_receiver_countries",
     "receiver_fan_in_ratio",
     "time_since_last_tx_hours",
+    # graph-level features
+    "in_any_cycle",
+    "min_cycle_len",
+    "scatter_source_count",
+    "gather_target_count",
+    "scatter_gather_score",
+    "shared_counterparty_count",
 ]
 
 
-def build_features(df: pd.DataFrame) -> pd.DataFrame:
+def build_features(df: pd.DataFrame, include_graph: bool = True) -> pd.DataFrame:
     df = add_transaction_features(df)
     df = add_account_features(df)
+    if include_graph:
+        from pipeline.graph_features import add_graph_features
+        df = add_graph_features(df)
     return df
