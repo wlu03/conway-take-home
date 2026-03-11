@@ -18,8 +18,8 @@ METRIC_FEATURES = [
     "sender_unique_receiver_countries",
 ]
 
-"""Score each transaction with Isolation Forest"""
-def score_transactions(
+## Score each transaction with Isolation Forest
+def isofrst_score_transaction(
     df: pd.DataFrame,
     features: list = METRIC_FEATURES,
     contamination: float = 0.01, # expected fraciton of outliers (1% greater than the true 0.1% rate in paper)
