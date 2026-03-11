@@ -94,13 +94,14 @@ def score_mad(df: pd.DataFrame,
     abs_dev = np.abs(X_vals - medians)
     mad = np.median(abs_dev, axis=0)
 
-    # Avoid division by zero for constant features
-    mad = np.where(mad == 0, 1e-6, mad)
-
     # Only score features where MAD > 0; zero-MAD (constant) features carry no signal
     valid = mad > 0
     modified_z = np.zeros_like(abs_dev)
-    modified_z[:, valid] = 0.6745 * abs_dev[:, valid] / mad[valid]
+    modified_z[:, valid] = abs_dev[:, valid] / mad[valid]
+
+    # Cap at 99.9th percentile to handle extremes without flattening the top
+    cap = np.percentile(modified_z[modified_z > 0], 99.9)
+    modified_z = np.clip(modified_z, 0, cap)
 
     # Score = worst-case deviation across all valid features
     raw_scores = modified_z[:, valid].max(axis=1)
@@ -122,7 +123,7 @@ def score_mcd(
     features: list = METRIC_FEATURES,
     support_fraction: float = 0.95,
     random_state: int = 42,
-    sample_size: int = 10_000,
+    sample_size: int = 100_000,
 ) -> tuple[pd.DataFrame, MinCovDet]:
     """
     MCD: scoring, multivariate.
