@@ -1,0 +1,960 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>MacroBase-Style Unsupervised AML Detection — Project Writeup</title>
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <header class="site-header">
+      <div class="wrap">
+        <h1 class="site-title">
+          MacroBase-Style Unsupervised Detection<br />
+          <span class="subtitle">for Anti-Money Laundering over 9.5M Transactions</span>
+        </h1>
+        <p class="byline">Wesley Lu &middot; Spring 2026 &middot; Project Writeup</p>
+      </div>
+      <nav class="site-nav" aria-label="Section navigation">
+        <div class="wrap nav-wrap">
+          <a href="#abstract">Abstract</a>
+          <a href="#introduction">Introduction</a>
+          <a href="#literature">Literature</a>
+          <a href="#dataset">Dataset</a>
+          <a href="#methods">Methods</a>
+          <a href="#results">Results</a>
+          <a href="#discussion">Discussion</a>
+          <a href="#references">References</a>
+        </div>
+      </nav>
+    </header>
+
+    <main class="wrap">
+      <!-- ============================================================ -->
+      <section id="abstract">
+        <h2>Abstract</h2>
+        <p>
+          We present an unsupervised, fully explainable anti-money-laundering (AML)
+          detection pipeline applied to the <em>SAML-D</em> synthetic transaction
+          dataset (Oztas et&nbsp;al., 2023). The pipeline follows the
+          <strong>MacroBase</strong> architecture (Bailis et&nbsp;al., 2017) — ingest,
+          feature-build, score, classify, explain — and combines three orthogonal
+          anomaly scorers (Isolation Forest, Median Absolute Deviation, and Minimum
+          Covariance Determinant) with a frequent-pattern-mining step that surfaces
+          the attribute combinations most over-represented in the outlier set.
+          At a top-1% classification cutoff, the Isolation Forest scorer achieves
+          <strong>F1&nbsp;=&nbsp;0.0445</strong> and <strong>ROC-AUC&nbsp;=&nbsp;0.8506</strong>
+          on 9,504,852 transactions, recovering 23.65% of labeled money-laundering
+          activity without ever seeing a label during training. The explanation stage
+          surfaces 149 frequent predicate combinations at risk ratios up to 17.76&times;
+          the population baseline. Per-typology analysis shows the pipeline is
+          strongest on behavioural-change patterns (92.5% recall) and structurally
+          distinctive typologies (Scatter-Gather 32.8%, Layered-Fan-Out 30.8%) and
+          weakest on smurfing (0% recall), which motivates future work on
+          temporal-window features.
+        </p>
+      </section>
+
+      <!-- ============================================================ -->
+      <section id="introduction">
+        <h2>1. Introduction</h2>
+        <p>
+          Anti-money-laundering (AML) detection is a <em>needle-in-a-haystack</em>
+          problem. On SAML-D the positive rate is <strong>0.104%</strong> — 9,873
+          labeled suspicious transactions out of 9.5 million — and most of those
+          positives are individually indistinguishable from ordinary economic
+          activity. Laundering typologies such as <em>cycle</em>, <em>fan-out</em>,
+          <em>scatter-gather</em>, and <em>structuring</em> are defined by
+          <em>behaviour over multiple accounts and over time</em>, not by any
+          single feature of a single transaction. A detector that looks only at
+          row-level attributes cannot, by construction, see them.
+        </p>
+        <p>
+          Production AML tools typically lean on hand-written rules ("report any
+          wire above $10,000", "flag cash deposits just under the SAR threshold")
+          which are brittle, high-false-positive, and easy to evade. Supervised
+          machine learning is attractive but requires label noise and class
+          imbalance so extreme that it rarely survives contact with real ops.
+          We take the opposite approach: <em>no labels at training time, and
+          explanations built from the data itself.</em>
+        </p>
+        <p>
+          Our contribution is threefold:
+        </p>
+        <ul>
+          <li>
+            A MacroBase-style pipeline instantiation for SAML-D, with a three-tier
+            feature hierarchy (transaction, account, graph) that captures the
+            typology-defining behaviours without requiring a full graph library.
+          </li>
+          <li>
+            An empirical comparison of Isolation Forest, MAD, and MCD on a
+            multimodal inlier distribution, with F1, ROC-AUC, and per-typology
+            recall reported at six classification thresholds.
+          </li>
+          <li>
+            An explainable alert layer built on FP-Growth over the outlier set
+            that produces 149 frequent attribute combinations with risk ratios
+            up to 17.76&times;, operationally actionable for an analyst team.
+          </li>
+        </ul>
+      </section>
+
+      <!-- ============================================================ -->
+      <section id="literature">
+        <h2>2. Related Work</h2>
+
+        <h3>2.1 MacroBase</h3>
+        <p>
+          Bailis et&nbsp;al. (2017) introduce <em>MacroBase</em>, a fast-data
+          analytics pipeline that combines statistical outlier detection with
+          a contrast-set mining stage producing human-readable explanations.
+          Their <em>risk ratio</em> metric — the ratio of a predicate's support
+          in the outlier set to its support in the full population — is the
+          foundation of our explanation stage. We adopt their two-pass strategy:
+          compute single-predicate risk ratios first, prune below a minimum
+          threshold, then run frequent itemset mining (FP-Growth) over only the
+          surviving candidates to control combinatorial blow-up.
+        </p>
+
+        <h3>2.2 Isolation Forest</h3>
+        <p>
+          Liu, Ting, and Zhou (2008) propose <em>Isolation Forest</em>, a
+          non-parametric outlier detector that isolates anomalies by recursively
+          random-splitting features and measuring the expected path length.
+          Anomalies reach leaf nodes after fewer splits because they sit in
+          sparse regions. The algorithm makes no distributional assumptions,
+          which we found essential for SAML-D: its inlier population is
+          multimodal (cash deposits, cheques, cross-border wires, and payroll
+          all have distinct amount and timing distributions) and a single
+          Gaussian cannot fit it. We follow the paper's recommended
+          <code>max_samples=256</code> and <code>n_estimators=100</code>
+          because subsampling reduces the "masking" effect when anomalies
+          cluster.
+        </p>
+
+        <h3>2.3 Graph Features for AML</h3>
+        <p>
+          Weber et&nbsp;al. (2019) demonstrate on the Elliptic Bitcoin dataset
+          that graph-neural-network features improve AML detection F1 by
+          <strong>30–40%</strong> over transaction-level features alone,
+          specifically on layering typologies where individual transactions
+          appear normal. Savage et&nbsp;al. (2016) show that real-world
+          laundering networks have measurably different topological
+          properties — higher clustering coefficient, shorter average path
+          length, more bidirectional ties — than legitimate transaction graphs.
+          Both results motivated our graph feature layer, though we use a
+          pandas-native approximation (cycle detection via self-joins,
+          scatter-gather scoring via aggregation, shared-counterparty counts
+          via set intersection) rather than a full GNN, so the pipeline
+          remains tractable at 9.5 million rows on commodity hardware.
+        </p>
+
+        <h3>2.4 SAML-D Dataset</h3>
+        <p>
+          Oztas et&nbsp;al. (2023) release SAML-D, a synthetic AML monitoring
+          dataset of 9.5 million transactions containing labeled instances of
+          17 laundering typologies. The paper explicitly labels <em>Cycle</em>,
+          <em>Scatter-Gather</em>, <em>Stacked Bipartite</em>, and
+          <em>Layered Fan-In/Out</em> as typologies that require
+          <strong>network-level analysis</strong> to detect, which is the
+          direct motivation for our graph feature layer. SAML-D is synthetic,
+          but its typology definitions are drawn from real FATF typology
+          reports, so the ground truth is structurally meaningful even if the
+          counterparty identities are not real.
+        </p>
+
+        <h3>2.5 Regulatory Context</h3>
+        <p>
+          The United States Bank Secrecy Act requires financial institutions to
+          file a Suspicious Activity Report (SAR) for any transaction above
+          $5,000 deemed suspicious, and IRS Form 8300 triggers at $10,000.
+          Launderers who know these thresholds engage in <em>structuring</em>,
+          splitting a large transfer into many deposits just below the
+          reporting threshold. Our <code>just_below_2k</code>,
+          <code>just_below_5k</code>, <code>just_below_10k</code>, and
+          <code>just_below_50k</code> features encode these hand-engineered
+          regulatory signals directly. Country-level risk is sourced from the
+          Financial Action Task Force's "Jurisdictions under Increased
+          Monitoring" lists (FATF, February 2026), which enumerate sanctioned
+          and high-risk jurisdictions; these populate the
+          <code>sender_blacklist</code> / <code>greylist</code> and
+          corresponding receiver features.
+        </p>
+      </section>
+
+      <!-- ============================================================ -->
+      <section id="dataset">
+        <h2>3. Dataset</h2>
+        <p>
+          We evaluate on the full SAML-D corpus. Key statistics:
+        </p>
+
+        <div class="stat-grid">
+          <div class="stat">
+            <div class="stat-num">9,504,852</div>
+            <div class="stat-lbl">transactions</div>
+          </div>
+          <div class="stat">
+            <div class="stat-num">9,873</div>
+            <div class="stat-lbl">labeled suspicious</div>
+          </div>
+          <div class="stat">
+            <div class="stat-num">0.104%</div>
+            <div class="stat-lbl">base rate</div>
+          </div>
+          <div class="stat">
+            <div class="stat-num">17</div>
+            <div class="stat-lbl">laundering typologies</div>
+          </div>
+        </div>
+
+        <p>
+          Raw columns include transaction timestamp (<code>Date</code>,
+          <code>Time</code>), sender and receiver account identifiers, amount
+          in source currency, source and destination currencies, sender and
+          receiver bank locations (country level), payment type (Wire, ACH,
+          Cash Deposit, Cheque, Cross-border, ...), and two ground-truth
+          columns (<code>Is_laundering</code>, <code>Laundering_type</code>)
+          which are dropped before any unsupervised processing and only
+          reattached in the evaluation stage.
+        </p>
+      </section>
+
+      <!-- ============================================================ -->
+      <section id="methods">
+        <h2>4. Methods</h2>
+
+        <h3>4.1 Feature Engineering</h3>
+        <p>
+          Features are built in three layers, each targeting a different class
+          of laundering signal.
+        </p>
+
+        <h4>Transaction-level</h4>
+        <p>
+          Row-by-row features computed independently per transaction.
+        </p>
+        <table>
+          <thead>
+            <tr><th>Feature</th><th>Signal</th></tr>
+          </thead>
+          <tbody>
+            <tr><td><code>log_amount</code></td><td>Compresses heavy-tailed amount distribution so modest anomalies aren't drowned out.</td></tr>
+            <tr><td><code>is_currency_conversion</code></td><td>Flag when payment and received currencies differ.</td></tr>
+            <tr><td><code>sender_blacklist</code>, <code>_greylist</code></td><td>FATF February 2026 high-risk and monitored jurisdictions on the sending side.</td></tr>
+            <tr><td><code>receiver_blacklist</code>, <code>_greylist</code></td><td>Same, receiving side.</td></tr>
+            <tr><td><code>any_high_risk</code></td><td>Either counterparty in a FATF-listed jurisdiction.</td></tr>
+            <tr><td><code>just_below_{2,5,10,50}k</code></td><td>Structuring signals at SAR and IRS Form 8300 reporting thresholds.</td></tr>
+            <tr><td><code>is_off_hours</code>, <code>is_weekend</code></td><td>Time-of-day and day-of-week anomalies.</td></tr>
+          </tbody>
+        </table>
+
+        <h4>Account-level</h4>
+        <p>
+          Per-account aggregates computed via groupby and merged back onto the
+          transaction rows. These encode <em>behaviour over time</em> at the
+          account level.
+        </p>
+        <table>
+          <thead>
+            <tr><th>Feature</th><th>AML typology targeted</th></tr>
+          </thead>
+          <tbody>
+            <tr><td><code>sender_fan_out_ratio</code></td><td>Fan-Out: one sender distributing to many receivers.</td></tr>
+            <tr><td><code>sender_amount_cv</code></td><td>Structuring: low coefficient of variation implies many similarly-sized transactions.</td></tr>
+            <tr><td><code>sender_unique_receiver_countries</code></td><td>Layering: money touching many jurisdictions.</td></tr>
+            <tr><td><code>receiver_fan_in_ratio</code></td><td>Fan-In: many senders converging on one aggregator.</td></tr>
+            <tr><td><code>time_since_last_tx_hours</code></td><td>Rapid-succession structuring.</td></tr>
+          </tbody>
+        </table>
+
+        <h4>Graph-level</h4>
+        <p>
+          Transaction- and account-level features score each row independently;
+          they cannot see patterns that emerge only <em>across multiple related
+          accounts</em>. The graph-level layer computes a compact directed edge
+          table (one row per unique sender→receiver pair) and derives per-account
+          topological signals using pandas merge operations — no full graph
+          traversal, so it scales to 9.5M rows.
+        </p>
+        <table>
+          <thead>
+            <tr><th>Feature</th><th>Typology</th><th>How computed</th></tr>
+          </thead>
+          <tbody>
+            <tr><td><code>in_2hop_cycle</code></td><td>Round-tripping (A→B→A)</td><td>Self-join edge table on <code>Receiver=Sender</code>, check terminal equals origin.</td></tr>
+            <tr><td><code>in_3hop_cycle</code></td><td>Cycle through shell (A→B→C→A)</td><td>Two-hop join extended by one more hop.</td></tr>
+            <tr><td><code>scatter_source_count</code></td><td>Scatter-Gather intermediary</td><td>Count of high-fan-out senders sending TO this account.</td></tr>
+            <tr><td><code>gather_target_count</code></td><td>Scatter-Gather convergence</td><td>Count of co-receivers sharing senders and downstream targets.</td></tr>
+            <tr><td><code>shared_counterparty_count</code></td><td>Bidirectional layering</td><td>Count of accounts that both send to and receive from this account.</td></tr>
+          </tbody>
+        </table>
+
+        <h3>4.2 Scoring</h3>
+        <p>
+          Three orthogonal scorers run in parallel on the same engineered
+          feature matrix. All write to independent columns so results can be
+          compared directly.
+        </p>
+
+        <h4>Isolation Forest (primary)</h4>
+        <p>
+          Non-parametric. Randomly splits features and measures the expected
+          isolation depth of each point. Anomalies sit in sparse regions of
+          feature space and are isolated in fewer splits. Handles multimodal
+          inlier distributions natively, which is the decisive property on
+          SAML-D. Hyperparameters per Liu et al.:
+          <code>n_estimators=100</code>, <code>max_samples=256</code>,
+          <code>contamination=0.01</code>.
+        </p>
+
+        <h4>Median Absolute Deviation (univariate)</h4>
+        <p>
+          For each feature independently,
+          <code>modified_z = 0.6745 &middot; |x − median| / MAD</code>, where
+          0.6745 calibrates MAD to a Gaussian standard deviation. The final
+          score is the <strong>maximum</strong> modified z across all features:
+          a row is anomalous if it is an outlier in <em>any</em> single
+          dimension. Binary features (MAD = 0) are skipped to prevent
+          divide-by-zero dominance.
+        </p>
+
+        <h4>Minimum Covariance Determinant (multivariate)</h4>
+        <p>
+          Fits a robust covariance ellipsoid to the densest 95% of inliers,
+          then scores each transaction by its Mahalanobis distance from the
+          robust centroid. Unlike MAD, MCD accounts for feature correlations.
+          FastMCD is O(n·p²), so the model is fit on a 10,000-row subsample
+          and used to score the full dataset.
+        </p>
+
+        <h3>4.3 Classification</h3>
+        <p>
+          We choose classification thresholds at <em>percentiles of the score
+          distribution</em> rather than fixed scalar cutoffs, because the
+          score distributions of the three methods live on completely
+          different scales (see Results § 5.1). The default is the
+          <strong>top 1%</strong> cutoff: at 0.1% true prevalence, 1% gives the
+          explanation stage enough signal (~95K rows) to surface meaningful
+          patterns while keeping the false-positive rate small enough that risk
+          ratios remain interpretable.
+        </p>
+
+        <h3>4.4 Explanation via FP-Growth</h3>
+        <p>
+          The explanation stage implements Algorithm 2 from Bailis et al.
+          For each attribute combination over the outlier set, we compute:
+        </p>
+        <p class="formula">
+          <code>risk_ratio(p) = P(p | outlier) / P(p | population)</code>
+        </p>
+        <p>
+          A risk ratio of 40 means the predicate is 40&times; more common in
+          flagged transactions than in the full dataset. The two-pass strategy
+          from the paper keeps the combinatorial complexity bounded:
+        </p>
+        <ol>
+          <li>Compute single-attribute risk ratios over the ~95K outlier set.
+            Prune anything below <code>min_support = 0.001</code> or
+            <code>min_risk_ratio = 3.0</code>.</li>
+          <li>Run FP-Growth on the outlier set using only the surviving
+            candidate predicates. Compute risk ratios for each frequent itemset
+            against the full population.</li>
+        </ol>
+        <p>
+          Attribute columns used for explanation:
+          <code>Payment_type</code>, <code>Sender_bank_location</code>,
+          <code>Receiver_bank_location</code>, <code>Payment_currency</code>,
+          <code>Received_currency</code>,
+          <code>is_currency_conversion_str</code>,
+          <code>any_high_risk_str</code>, <code>is_weekend_str</code>.
+        </p>
+      </section>
+
+      <!-- ============================================================ -->
+      <section id="results">
+        <h2>5. Results</h2>
+
+        <h3>5.1 Scorer comparison at top 1%</h3>
+        <p>
+          Table&nbsp;1 shows the head-to-head comparison of the three scorers at
+          the default top-1% classification threshold. Isolation Forest is the
+          clear winner on precision, recall, and F1, while MCD posts the highest
+          ROC-AUC despite a narrower flagged range.
+        </p>
+
+        <div class="table-wrap">
+          <table class="results-table">
+            <caption>Table 1. Scorer comparison at top-1% cutoff, 9,504,852 transactions, 9,873 positives.</caption>
+            <thead>
+              <tr>
+                <th>Scorer</th>
+                <th class="num">Flagged</th>
+                <th class="num">True Pos</th>
+                <th class="num">Precision</th>
+                <th class="num">Recall</th>
+                <th class="num">F1</th>
+                <th class="num">ROC-AUC</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr class="primary">
+                <td><strong>Isolation Forest</strong></td>
+                <td class="num">95,049</td>
+                <td class="num">2,335</td>
+                <td class="num">2.46%</td>
+                <td class="num">23.65%</td>
+                <td class="num">0.0445</td>
+                <td class="num">0.8506</td>
+              </tr>
+              <tr>
+                <td>MAD</td>
+                <td class="num">372,838</td>
+                <td class="num">1,452</td>
+                <td class="num">0.39%</td>
+                <td class="num">14.71%</td>
+                <td class="num">0.0076</td>
+                <td class="num">0.8243</td>
+              </tr>
+              <tr>
+                <td>MCD</td>
+                <td class="num">95,049</td>
+                <td class="num">422</td>
+                <td class="num">0.44%</td>
+                <td class="num">4.27%</td>
+                <td class="num">0.0080</td>
+                <td class="num">0.8527</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <p>
+          MAD flags ~4&times; more transactions than its percentile threshold
+          would nominally imply because many rows share identical maximum
+          modified-z values (ties on a small number of features), and the
+          ranking is broken by insertion order. This inflates its raw flagged
+          count without lifting its F1. MCD's high ROC-AUC comes with a very
+          low recall at the chosen cutoff because its Mahalanobis distances
+          form a heavy-tailed distribution where the top 1% captures only
+          the most extreme outliers.
+        </p>
+
+        <h3>5.2 Precision–recall trade-off by threshold</h3>
+        <p>
+          Figure&nbsp;1 sweeps the classification percentile from 0.1% to 10%
+          on Isolation Forest scores and plots precision, recall, and F1.
+          Precision peaks at the tightest threshold, as expected, while F1
+          peaks at 0.5% due to the precision–recall trade-off.
+        </p>
+
+        <figure>
+          <svg viewBox="0 0 820 420" role="img" aria-labelledby="fig1-title">
+            <title id="fig1-title">Precision, recall, and F1 vs classification threshold</title>
+            <!-- Axes -->
+            <line x1="70" y1="360" x2="790" y2="360" stroke="#333" stroke-width="1.5" />
+            <line x1="70" y1="360" x2="70" y2="40" stroke="#333" stroke-width="1.5" />
+
+            <!-- Y axis labels (left — recall 0-70%) -->
+            <text x="62" y="364" text-anchor="end" font-size="11">0%</text>
+            <text x="62" y="315" text-anchor="end" font-size="11">10%</text>
+            <text x="62" y="266" text-anchor="end" font-size="11">20%</text>
+            <text x="62" y="217" text-anchor="end" font-size="11">30%</text>
+            <text x="62" y="168" text-anchor="end" font-size="11">40%</text>
+            <text x="62" y="119" text-anchor="end" font-size="11">50%</text>
+            <text x="62" y="70" text-anchor="end" font-size="11">60%</text>
+
+            <text x="20" y="200" text-anchor="middle" font-size="12" transform="rotate(-90 20 200)">recall / precision</text>
+
+            <!-- Gridlines -->
+            <line x1="70" y1="315" x2="790" y2="315" stroke="#eee" />
+            <line x1="70" y1="266" x2="790" y2="266" stroke="#eee" />
+            <line x1="70" y1="217" x2="790" y2="217" stroke="#eee" />
+            <line x1="70" y1="168" x2="790" y2="168" stroke="#eee" />
+            <line x1="70" y1="119" x2="790" y2="119" stroke="#eee" />
+            <line x1="70" y1="70"  x2="790" y2="70"  stroke="#eee" />
+
+            <!-- X axis labels (thresholds) -->
+            <!-- positions: 0.1%, 0.5%, 1%, 2%, 5%, 10% -->
+            <text x="140" y="380" text-anchor="middle" font-size="11">0.1%</text>
+            <text x="260" y="380" text-anchor="middle" font-size="11">0.5%</text>
+            <text x="380" y="380" text-anchor="middle" font-size="11">1.0%</text>
+            <text x="500" y="380" text-anchor="middle" font-size="11">2.0%</text>
+            <text x="620" y="380" text-anchor="middle" font-size="11">5.0%</text>
+            <text x="740" y="380" text-anchor="middle" font-size="11">10.0%</text>
+            <text x="430" y="408" text-anchor="middle" font-size="12">classification threshold (%)</text>
+
+            <!-- Recall line (y = 360 - recall% * 4.9) -->
+            <!-- 0.1→3.25, 0.5→14.51, 1→23.65, 2→33.02, 5→49.04, 10→61.57 -->
+            <polyline fill="none" stroke="#1e3a8a" stroke-width="2.5"
+              points="140,344 260,289 380,244 500,198 620,120 740,58" />
+            <circle cx="140" cy="344" r="4" fill="#1e3a8a" />
+            <circle cx="260" cy="289" r="4" fill="#1e3a8a" />
+            <circle cx="380" cy="244" r="4" fill="#1e3a8a" />
+            <circle cx="500" cy="198" r="4" fill="#1e3a8a" />
+            <circle cx="620" cy="120" r="4" fill="#1e3a8a" />
+            <circle cx="740" cy="58"  r="4" fill="#1e3a8a" />
+
+            <!-- Precision line (scaled up ×10 because values 0.64 – 3.37% are tiny) -->
+            <!-- showing ×10: 0.1→33.7, 0.5→30.2, 1→24.6, 2→17.1, 5→10.2, 10→6.4 (on %-ish scale) -->
+            <polyline fill="none" stroke="#b91c1c" stroke-width="2.5" stroke-dasharray="6 4"
+              points="140,195 260,212 500,276 380,239 620,310 740,329" />
+            <polyline fill="none" stroke="#b91c1c" stroke-width="2.5" stroke-dasharray="6 4"
+              points="140,195 260,212 380,239 500,276 620,310 740,329" />
+            <circle cx="140" cy="195" r="4" fill="#b91c1c" />
+            <circle cx="260" cy="212" r="4" fill="#b91c1c" />
+            <circle cx="380" cy="239" r="4" fill="#b91c1c" />
+            <circle cx="500" cy="276" r="4" fill="#b91c1c" />
+            <circle cx="620" cy="310" r="4" fill="#b91c1c" />
+            <circle cx="740" cy="329" r="4" fill="#b91c1c" />
+
+            <!-- F1 line (scale ×500 because 0.01 – 0.05) -->
+            <!-- values 0.0331, 0.0499, 0.0445, 0.0326, 0.0200, 0.0127 -->
+            <polyline fill="none" stroke="#065f46" stroke-width="2.5" stroke-dasharray="2 3"
+              points="140,279 260,237 380,251 500,280 620,311 740,328" />
+            <circle cx="140" cy="279" r="4" fill="#065f46" />
+            <circle cx="260" cy="237" r="4" fill="#065f46" />
+            <circle cx="380" cy="251" r="4" fill="#065f46" />
+            <circle cx="500" cy="280" r="4" fill="#065f46" />
+            <circle cx="620" cy="311" r="4" fill="#065f46" />
+            <circle cx="740" cy="328" r="4" fill="#065f46" />
+
+            <!-- Legend -->
+            <g transform="translate(560, 50)">
+              <rect x="-10" y="-10" width="230" height="70" fill="#fff" stroke="#ccc" />
+              <line x1="0" y1="8" x2="30" y2="8" stroke="#1e3a8a" stroke-width="2.5" />
+              <text x="36" y="12" font-size="12">recall</text>
+              <line x1="0" y1="28" x2="30" y2="28" stroke="#b91c1c" stroke-width="2.5" stroke-dasharray="6 4" />
+              <text x="36" y="32" font-size="12">precision (&times;10)</text>
+              <line x1="0" y1="48" x2="30" y2="48" stroke="#065f46" stroke-width="2.5" stroke-dasharray="2 3" />
+              <text x="36" y="52" font-size="12">F1 (&times;500)</text>
+            </g>
+          </svg>
+          <figcaption>
+            <strong>Figure 1.</strong> Precision, recall, and F1 at six classification
+            percentiles on Isolation Forest scores. Precision is rescaled ×10 and F1 ×500
+            to make the three curves visible on a common axis.
+          </figcaption>
+        </figure>
+
+        <div class="table-wrap">
+          <table class="results-table">
+            <caption>Table 2. Precision–recall trade-off on Isolation Forest scores across six classification percentiles.</caption>
+            <thead>
+              <tr>
+                <th>Threshold</th>
+                <th class="num">Flagged</th>
+                <th class="num">True Pos</th>
+                <th class="num">Precision</th>
+                <th class="num">Recall</th>
+                <th class="num">F1</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr><td>0.1%</td><td class="num">9,531</td><td class="num">321</td><td class="num">3.37%</td><td class="num">3.25%</td><td class="num">0.0331</td></tr>
+              <tr class="primary"><td>0.5%</td><td class="num">47,525</td><td class="num">1,433</td><td class="num">3.02%</td><td class="num">14.51%</td><td class="num"><strong>0.0499</strong></td></tr>
+              <tr><td>1.0%</td><td class="num">95,049</td><td class="num">2,335</td><td class="num">2.46%</td><td class="num">23.65%</td><td class="num">0.0445</td></tr>
+              <tr><td>2.0%</td><td class="num">190,098</td><td class="num">3,260</td><td class="num">1.71%</td><td class="num">33.02%</td><td class="num">0.0326</td></tr>
+              <tr><td>5.0%</td><td class="num">475,243</td><td class="num">4,842</td><td class="num">1.02%</td><td class="num">49.04%</td><td class="num">0.0200</td></tr>
+              <tr><td>10.0%</td><td class="num">950,495</td><td class="num">6,079</td><td class="num">0.64%</td><td class="num">61.57%</td><td class="num">0.0127</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <h3>5.3 Per-typology recall</h3>
+        <p>
+          Figure&nbsp;2 decomposes recall at the top-1% threshold by laundering
+          typology. The pipeline is strongest on behavioural-change and
+          structured-network typologies and weakest on smurfing and
+          bipartite typologies that rely on very-small-amount structuring.
+        </p>
+
+        <figure>
+          <svg viewBox="0 0 820 560" role="img" aria-labelledby="fig2-title">
+            <title id="fig2-title">Per-typology recall at top-1% threshold</title>
+            <!-- 17 typologies, horizontal bar chart -->
+            <!-- bar y spacing 28px, bar height 18, y0 = 20 -->
+
+            <!-- background grid (20% increments) -->
+            <line x1="240" y1="15" x2="240" y2="500" stroke="#eee" />
+            <line x1="350" y1="15" x2="350" y2="500" stroke="#eee" />
+            <line x1="460" y1="15" x2="460" y2="500" stroke="#eee" />
+            <line x1="570" y1="15" x2="570" y2="500" stroke="#eee" />
+            <line x1="680" y1="15" x2="680" y2="500" stroke="#eee" />
+            <line x1="790" y1="15" x2="790" y2="500" stroke="#eee" />
+
+            <text x="240" y="520" text-anchor="middle" font-size="11">20%</text>
+            <text x="350" y="520" text-anchor="middle" font-size="11">40%</text>
+            <text x="460" y="520" text-anchor="middle" font-size="11">60%</text>
+            <text x="570" y="520" text-anchor="middle" font-size="11">80%</text>
+            <text x="680" y="520" text-anchor="middle" font-size="11">100%</text>
+            <text x="450" y="543" text-anchor="middle" font-size="12">recall</text>
+
+            <!-- bars: 17 typologies sorted by recall descending. x scale: 5.5 px per percentage point, offset 240 -->
+            <!-- Behavioural_Change_2 92.5% -->
+            <g>
+              <text x="235" y="34" text-anchor="end" font-size="11">Behavioural_Change_2</text>
+              <rect x="240" y="22" width="508.75" height="18" fill="#065f46" />
+              <text x="756" y="36" font-size="11">92.5% (319/345)</text>
+            </g>
+            <!-- Behavioural_Change_1 74.6% -->
+            <g>
+              <text x="235" y="62" text-anchor="end" font-size="11">Behavioural_Change_1</text>
+              <rect x="240" y="50" width="410.3" height="18" fill="#065f46" />
+              <text x="658" y="64" font-size="11">74.6% (294/394)</text>
+            </g>
+            <!-- Scatter-Gather 32.8% -->
+            <g>
+              <text x="235" y="90" text-anchor="end" font-size="11">Scatter-Gather</text>
+              <rect x="240" y="78" width="180.4" height="18" fill="#1e3a8a" />
+              <text x="428" y="92" font-size="11">32.8% (111/338)</text>
+            </g>
+            <!-- Layered_Fan_Out 30.8% -->
+            <g>
+              <text x="235" y="118" text-anchor="end" font-size="11">Layered_Fan_Out</text>
+              <rect x="240" y="106" width="169.4" height="18" fill="#1e3a8a" />
+              <text x="418" y="120" font-size="11">30.8% (163/529)</text>
+            </g>
+            <!-- Over-Invoicing 27.8% -->
+            <g>
+              <text x="235" y="146" text-anchor="end" font-size="11">Over-Invoicing</text>
+              <rect x="240" y="134" width="152.9" height="18" fill="#1e3a8a" />
+              <text x="401" y="148" font-size="11">27.8% (15/54)</text>
+            </g>
+            <!-- Structuring 27.1% -->
+            <g>
+              <text x="235" y="174" text-anchor="end" font-size="11">Structuring</text>
+              <rect x="240" y="162" width="149.05" height="18" fill="#1e3a8a" />
+              <text x="397" y="176" font-size="11">27.1% (507/1,870)</text>
+            </g>
+            <!-- Deposit-Send 26.2% -->
+            <g>
+              <text x="235" y="202" text-anchor="end" font-size="11">Deposit-Send</text>
+              <rect x="240" y="190" width="144.1" height="18" fill="#1e3a8a" />
+              <text x="392" y="204" font-size="11">26.2% (248/945)</text>
+            </g>
+            <!-- Fan_In 24.5% -->
+            <g>
+              <text x="235" y="230" text-anchor="end" font-size="11">Fan_In</text>
+              <rect x="240" y="218" width="134.75" height="18" fill="#1e3a8a" />
+              <text x="382" y="232" font-size="11">24.5% (89/364)</text>
+            </g>
+            <!-- Stacked_Bipartite 24.3% -->
+            <g>
+              <text x="235" y="258" text-anchor="end" font-size="11">Stacked_Bipartite</text>
+              <rect x="240" y="246" width="133.65" height="18" fill="#1e3a8a" />
+              <text x="381" y="260" font-size="11">24.3% (123/506)</text>
+            </g>
+            <!-- Layered_Fan_In 21.6% -->
+            <g>
+              <text x="235" y="286" text-anchor="end" font-size="11">Layered_Fan_In</text>
+              <rect x="240" y="274" width="118.8" height="18" fill="#1e3a8a" />
+              <text x="366" y="288" font-size="11">21.6% (142/656)</text>
+            </g>
+            <!-- Cycle 19.9% -->
+            <g>
+              <text x="235" y="314" text-anchor="end" font-size="11">Cycle</text>
+              <rect x="240" y="302" width="109.45" height="18" fill="#1e3a8a" />
+              <text x="357" y="316" font-size="11">19.9% (76/382)</text>
+            </g>
+            <!-- Single_large 19.2% -->
+            <g>
+              <text x="235" y="342" text-anchor="end" font-size="11">Single_large</text>
+              <rect x="240" y="330" width="105.6" height="18" fill="#1e3a8a" />
+              <text x="353" y="344" font-size="11">19.2% (48/250)</text>
+            </g>
+            <!-- Gather-Scatter 19.2% -->
+            <g>
+              <text x="235" y="370" text-anchor="end" font-size="11">Gather-Scatter</text>
+              <rect x="240" y="358" width="105.6" height="18" fill="#1e3a8a" />
+              <text x="353" y="372" font-size="11">19.2% (68/354)</text>
+            </g>
+            <!-- Fan_Out 13.5% -->
+            <g>
+              <text x="235" y="398" text-anchor="end" font-size="11">Fan_Out</text>
+              <rect x="240" y="386" width="74.25" height="18" fill="#b45309" />
+              <text x="322" y="400" font-size="11">13.5% (32/237)</text>
+            </g>
+            <!-- Bipartite 10.2% -->
+            <g>
+              <text x="235" y="426" text-anchor="end" font-size="11">Bipartite</text>
+              <rect x="240" y="414" width="56.1" height="18" fill="#b45309" />
+              <text x="304" y="428" font-size="11">10.2% (39/383)</text>
+            </g>
+            <!-- Cash_Withdrawal 4.6% -->
+            <g>
+              <text x="235" y="454" text-anchor="end" font-size="11">Cash_Withdrawal</text>
+              <rect x="240" y="442" width="25.3" height="18" fill="#b91c1c" />
+              <text x="273" y="456" font-size="11">4.6% (61/1,334)</text>
+            </g>
+            <!-- Smurfing 0.0% -->
+            <g>
+              <text x="235" y="482" text-anchor="end" font-size="11">Smurfing</text>
+              <rect x="240" y="470" width="2" height="18" fill="#b91c1c" />
+              <text x="250" y="484" font-size="11">0.0% (0/932)</text>
+            </g>
+          </svg>
+          <figcaption>
+            <strong>Figure 2.</strong> Recall by laundering typology at the top-1%
+            classification cutoff. Green bars are typologies where recall exceeds
+            50%, navy bars are between 15% and 40%, orange bars between 10% and 15%,
+            and red bars below 5%.
+          </figcaption>
+        </figure>
+
+        <h3>5.4 Top risk-ratio patterns</h3>
+        <p>
+          The explanation stage produced 149 frequent predicate combinations
+          with risk ratios above 3.0. Table&nbsp;3 lists the top 10 by risk
+          ratio. The highest-risk patterns are dominated by cross-border
+          wires from <em>Albania</em> involving currency conversion — a
+          combination with a population support of 0.18% that accounts for
+          3.27% of the flagged set, a 17.76× concentration.
+        </p>
+
+        <div class="table-wrap">
+          <table class="results-table">
+            <caption>Table 3. Top 10 attribute combinations by risk ratio (FP-Growth output, outlier set = top 1% by Isolation Forest score).</caption>
+            <thead>
+              <tr>
+                <th class="num">#</th>
+                <th>Predicate</th>
+                <th class="num">Outlier support</th>
+                <th class="num">Count</th>
+                <th class="num">Risk ratio</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr><td class="num">1</td><td><code>Payment_type=Cross-border ∧ Sender=Albania ∧ currency_conversion=yes</code></td><td class="num">3.27%</td><td class="num">3,111</td><td class="num"><strong>17.76×</strong></td></tr>
+              <tr><td class="num">2</td><td><code>Sender=Albania ∧ currency_conversion=yes</code></td><td class="num">3.27%</td><td class="num">3,111</td><td class="num">17.76×</td></tr>
+              <tr><td class="num">3</td><td><code>Payment_currency=Albanian lek ∧ Sender=Albania ∧ currency_conversion=yes</code></td><td class="num">3.24%</td><td class="num">3,083</td><td class="num">17.75×</td></tr>
+              <tr><td class="num">4</td><td><code>Payment_type=Cross-border ∧ Sender=Albania</code></td><td class="num">3.27%</td><td class="num">3,111</td><td class="num">17.74×</td></tr>
+              <tr><td class="num">5</td><td><code>Payment_currency=Albanian lek ∧ Payment_type=Cross-border ∧ Sender=Albania</code></td><td class="num">3.24%</td><td class="num">3,083</td><td class="num">17.74×</td></tr>
+              <tr><td class="num">6</td><td><code>Payment_currency=Albanian lek ∧ Sender=Albania</code></td><td class="num">3.25%</td><td class="num">3,086</td><td class="num">17.65×</td></tr>
+              <tr><td class="num">7</td><td><code>Payment_currency=Albanian lek ∧ Payment_type=Cross-border ∧ currency_conversion=yes</code></td><td class="num">3.31%</td><td class="num">3,142</td><td class="num">17.37×</td></tr>
+              <tr><td class="num">8</td><td><code>Payment_currency=Albanian lek ∧ Payment_type=Cross-border</code></td><td class="num">3.31%</td><td class="num">3,148</td><td class="num">17.34×</td></tr>
+              <tr><td class="num">9</td><td><code>Payment_currency=Albanian lek ∧ currency_conversion=yes</code></td><td class="num">3.87%</td><td class="num">3,680</td><td class="num">14.96×</td></tr>
+              <tr><td class="num">10</td><td><code>Payment_currency=Euro ∧ Received_currency=Albanian lek ∧ Receiver=Albania</code></td><td class="num">0.10%</td><td class="num">95</td><td class="num">14.87×</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- ============================================================ -->
+      <section id="discussion">
+        <h2>6. Discussion</h2>
+
+        <h3>6.1 Where the pipeline succeeds</h3>
+        <p>
+          The pipeline achieves <strong>ROC-AUC = 0.8506</strong> on SAML-D
+          without ever seeing a label at training time. That discrimination is
+          driven almost entirely by the feature engineering: transaction-level
+          structuring signals (<code>just_below_10k</code>) and
+          account-level behavioural features (<code>sender_amount_cv</code>,
+          <code>sender_fan_out_ratio</code>) give Isolation Forest enough
+          multivariate structure to separate classes with no supervision.
+          The per-typology recall breakdown confirms that the pipeline is
+          strongest exactly where the features target specific laundering
+          behaviours:
+        </p>
+        <ul>
+          <li>
+            <strong>Behavioural_Change typologies (92.5% and 74.6%)</strong>
+            are detected because the account-level time-since-last-transaction
+            and coefficient-of-variation features fire strongly when an
+            account's historical pattern changes abruptly.
+          </li>
+          <li>
+            <strong>Scatter-Gather (32.8%) and Layered_Fan_Out (30.8%)</strong>
+            are detected by the dedicated graph-level features
+            (<code>scatter_gather_score</code>, <code>sender_fan_out_ratio</code>).
+            Without the graph layer, these typologies drop by design —
+            they are not visible at the row level.
+          </li>
+          <li>
+            <strong>Structuring (27.1%)</strong> is detected by the
+            <code>just_below_Xk</code> margin features, which encode SAR
+            and IRS reporting thresholds as a direct signal.
+          </li>
+        </ul>
+
+        <h3>6.2 Where the pipeline struggles</h3>
+        <p>
+          The two failure modes are informative:
+        </p>
+        <ul>
+          <li>
+            <strong>Smurfing (0.0% recall)</strong> is an intentional
+            limitation of the feature set. Smurfing spreads small amounts
+            (well under $1,000) across many accounts and many days, without
+            any row-level "just below threshold" signal. Detecting it
+            requires a <em>rolling temporal window</em> feature
+            ("has this account received &gt;20 deposits of similar size in
+            the last 7 days?") that our current account-level aggregates do
+            not compute. Adding a windowed aggregation would be the single
+            largest gain available.
+          </li>
+          <li>
+            <strong>Cash_Withdrawal (4.6% recall)</strong> suffers from
+            the same root cause as Smurfing: the laundering signal is in the
+            <em>sequence</em> of withdrawals, not in any single one.
+          </li>
+          <li>
+            <strong>Bipartite typologies</strong> (Bipartite 10.2%, Fan_Out 13.5%)
+            are partially detected — the scatter-gather graph features catch
+            the intermediary role but miss the "terminal" accounts that only
+            appear as endpoints. A GNN-style message-passing layer would
+            likely close this gap.
+          </li>
+        </ul>
+
+        <h3>6.3 The Albania bias in the top alerts</h3>
+        <p>
+          The top nine risk-ratio patterns in Table&nbsp;3 are all dominated
+          by Albania. Two factors drive this:
+        </p>
+        <ol>
+          <li>
+            Albania appears on the FATF Grey List in the February 2026
+            update, which our <code>sender_greylist</code> feature encodes
+            directly. Any Isolation Forest tree that splits on this feature
+            will push Albanian senders toward the outlier leaf, systematically
+            over-representing them in the top 1%.
+          </li>
+          <li>
+            Albanian lek is a low-liquidity currency. Any cross-border
+            transaction from Albania in lek is forced into currency conversion,
+            producing a conjunction of three flagged features
+            (<code>sender_greylist</code>, <code>is_currency_conversion</code>,
+            cross-border payment type) that is rare in the population (support
+            &lt; 0.2%) but dense in the outlier set (support &gt; 3%).
+          </li>
+        </ol>
+        <p>
+          This is not a bug so much as a design feature: it shows the pipeline
+          correctly propagating the FATF-informed prior into the explanation
+          layer. In production, an analyst could either accept this as legitimate
+          risk stratification or add a <em>country-stratified</em> evaluation
+          mode where risk ratios are computed per-jurisdiction to surface
+          within-country anomalies.
+        </p>
+
+        <h3>6.4 Limitations</h3>
+        <ul>
+          <li>
+            <strong>Temporal structuring across days.</strong>
+            <code>time_since_last_tx_hours</code> captures rapid-succession
+            structuring but misses coordinated transactions spread over
+            multiple days. A rolling-window count would be more precise but
+            is expensive at 9.5M rows.
+          </li>
+          <li>
+            <strong>Overlapping classes.</strong> SAML-D includes typologies
+            <code>Normal_Fan_Out</code> and <code>Suspicious_Fan_Out</code>
+            that are structurally similar. Unsupervised detection will
+            produce false positives in regions of feature space where the
+            two populations overlap. This is the dominant source of the
+            precision ceiling at ~3.37% at the 0.1% threshold.
+          </li>
+          <li>
+            <strong>Graph feature scalability.</strong> The graph layer runs
+            in O(E²) time in the number of unique edges. On SAML-D this is
+            manageable (~80 seconds for the full dataset), but on
+            production-scale streams it would need either a sampling
+            strategy or a streaming approximation.
+          </li>
+          <li>
+            <strong>MCD multimodality assumption.</strong> MCD assumes the
+            inliers form a single Gaussian cluster. SAML-D's inliers are
+            multimodal, so MCD misfits — this is visible in its ROC-AUC
+            being highest (0.8527) while its recall at the 1% cutoff is
+            lowest (4.27%). MCD ranks well on average but is overconfident
+            at the tails.
+          </li>
+        </ul>
+
+        <h3>6.5 Future work</h3>
+        <ul>
+          <li>
+            <strong>Rolling-window behavioural features.</strong> A
+            7-day and 30-day rolling count of same-amount deposits per
+            sender/receiver should push Smurfing recall from 0% to at least
+            20–30%, and it is the single largest addressable gap.
+          </li>
+          <li>
+            <strong>Graph neural network layer.</strong> Replacing the pandas
+            approximation of graph features with a GCN on the transaction
+            graph (Weber et&nbsp;al., 2019) should close the gap on
+            Bipartite and Layered-Fan-In typologies at the cost of
+            substantial compute.
+          </li>
+          <li>
+            <strong>Threshold stratification.</strong> A per-country or
+            per-payment-type classification cutoff would reduce the
+            FATF-driven bias in the top alerts and make risk ratios more
+            locally interpretable.
+          </li>
+          <li>
+            <strong>Feedback loop.</strong> The platform already ships with
+            an analyst console (FastAPI + React) that displays flagged
+            transactions, explanations, and a graph viewer. Adding an
+            accept/reject button and using the captured labels as seed data
+            for a semi-supervised refinement of Isolation Forest would be
+            a natural next step.
+          </li>
+        </ul>
+      </section>
+
+      <!-- ============================================================ -->
+      <section id="references">
+        <h2>References</h2>
+        <ol class="references">
+          <li>
+            Bailis, P., Gan, E., Madden, S., Narayanan, D., Rong, K., &amp; Suri, S.
+            (2017). <em>MacroBase: Prioritizing Attention in Fast Data.</em>
+            SIGMOD 2017.
+          </li>
+          <li>
+            Oztas, B., Cetinkaya, D., Adedoyin, F., Budka, M., &amp; Aksu, H.
+            (2023). <em>Enhancing Anti-Money Laundering: Development of a
+            Synthetic Transaction Monitoring Dataset.</em> IEEE 2023.
+          </li>
+          <li>
+            Liu, F. T., Ting, K. M., &amp; Zhou, Z.-H. (2008).
+            <em>Isolation Forest.</em> ICDM 2008.
+          </li>
+          <li>
+            Han, J., Pei, J., &amp; Yin, Y. (2000).
+            <em>Mining Frequent Patterns without Candidate Generation.</em>
+            SIGMOD 2000.
+          </li>
+          <li>
+            Weber, M., Domeniconi, G., Chen, J., Weidele, D. K. I., Bellei,
+            C., Robinson, T., &amp; Leiserson, C. E. (2019).
+            <em>Anti-Money Laundering in Bitcoin: Experimenting with Graph
+            Convolutional Networks for Financial Forensics.</em>
+            KDD Workshop 2019.
+          </li>
+          <li>
+            Savage, D., Wang, Q., Chou, P., Zhang, X., &amp; Yu, X. (2016).
+            <em>Detection of Money Laundering Groups Using Supervised
+            Learning in Networks.</em> arXiv:1608.00708.
+          </li>
+          <li>
+            Financial Action Task Force (2026). <em>Jurisdictions under
+            Increased Monitoring.</em> February 2026 update.
+          </li>
+        </ol>
+      </section>
+
+      <footer>
+        <p>Project writeup &middot; Wesley Lu &middot; Spring 2026</p>
+        <p>
+          Source code:
+          <a href="https://github.com/wlu03/fraud-detection">github.com/wlu03/fraud-detection</a>
+        </p>
+      </footer>
+    </main>
+  </body>
+</html>
