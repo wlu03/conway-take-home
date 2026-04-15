@@ -1,3 +1,25 @@
 .env
+
+# Python bytecode
+__pycache__/
+*.pyc
 pipeline/__pycache__/*
+
+# Datasets (large raw CSVs)
 data/*
+
+# Trained models (large joblib binaries)
+models/
+
+# FastAPI runtime data — uploaded CSVs, scored parquets, SQLite registry
+web/api/data/
+
+# Node / Vite build artifacts
+web/ui/node_modules/
+web/ui/dist/
+web/ui/.vite/
+
+# OS / editor cruft
+.DS_Store
+*.swp
+*.swo
