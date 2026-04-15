@@ -35,6 +35,63 @@ New CSV must be in the same format as the training data. Ground-truth coluimns a
 `apply_scores()` uses the training data's `medians`/`mads` for MAD scoring and the stored `cutoff` for classification. The new CSV never influences the model, so scoring is fully consistent with training.
 
 ---
+
+## Web Console
+
+The repo ships with a FastAPI backend (`web/api`) and a React + Vite frontend (`web/ui`). The frontend has a landing page at `/` and a full analyst console at `/dashboard` (transactions, alerts, graph, runs).
+
+### 1. Backend — FastAPI
+
+Install the API extras once (the core pipeline deps in the root `requirements.txt` are reused):
+
+```bash
+pip install -r web/api/requirements.txt
+```
+
+Launch the API from the repo root so the `web.api` and `pipeline` packages resolve:
+
+```bash
+uvicorn web.api.main:app --reload --port 8000
+```
+
+- API root: `http://localhost:8000`
+- Health check: `http://localhost:8000/api/health`
+- Interactive docs: `http://localhost:8000/docs`
+
+CORS is preconfigured for the Vite dev server at `http://localhost:5173`.
+
+### 2. Frontend — React + Vite
+
+```bash
+cd web/ui
+npm install
+npm run dev
+```
+
+Then open `http://localhost:5173`. Routes:
+
+| Path | Purpose |
+|---|---|
+| `/` | Landing page |
+| `/dashboard` | Run KPIs, score histogram, country breakdowns |
+| `/transactions` | Filterable transactions table |
+| `/alerts` | Triage queue for flagged transactions |
+| `/graph` | Counterparty graph viewer |
+| `/runs` | Upload a CSV to create a new run |
+
+Production build (outputs to `web/ui/dist/`):
+
+```bash
+npm run build
+```
+
+### Typical workflow
+
+1. Start the backend (`uvicorn ...`) and the frontend (`npm run dev`) in two terminals.
+2. Open `http://localhost:5173`, click **Launch dashboard**, then go to **Runs** and upload a CSV.
+3. Once the run finishes, the dashboard, transactions, alerts, and graph views all populate from that run.
+
+---
 ## Architecture
 
 The pipeline follows the MacroBase architecture where you: 

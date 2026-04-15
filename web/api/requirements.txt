@@ -1,0 +1,7 @@
+# Additional dependencies for the FastAPI backend.
+# Core pipeline deps (pandas, numpy, scikit-learn, mlxtend, pyarrow) are
+# already listed in the repo-root requirements.txt and are NOT repeated here.
+fastapi>=0.110
+uvicorn[standard]>=0.27
+python-multipart>=0.0.9
+pydantic>=2.6
