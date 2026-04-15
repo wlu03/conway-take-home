@@ -78,7 +78,7 @@ def add_scatter_gather_features(df: pd.DataFrame) -> pd.DataFrame:
     fan_out = (
         edges.groupby("Sender_account")["Receiver_account"]
         .nunique()
-        .reset_index(rename={"Receiver_account": "fan_out"})
+        .reset_index(name="fan_out")
     )
     # pick the top 10% sender by fan out
     # scattter sources are account that send to many distinct receivers

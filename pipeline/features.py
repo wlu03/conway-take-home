@@ -84,6 +84,18 @@ def add_transaction_features(df: pd.DataFrame) -> pd.DataFrame:
 def add_account_features(df: pd.DataFrame) -> pd.DataFrame:
     df = df.copy().sort_values("DateTime")
 
+    # Drop any previously-computed account features so the merge below doesn't
+    # produce _x/_y suffixed columns when the input CSV was already enriched.
+    _account_output_cols = [
+        "sender_tx_count",
+        "sender_fan_out_ratio",
+        "sender_amount_cv",
+        "sender_unique_receiver_countries",
+        "receiver_fan_in_ratio",
+        "time_since_last_tx_hours",
+    ]
+    df = df.drop(columns=[c for c in _account_output_cols if c in df.columns])
+
     sender_grp = df.groupby("Sender_account", sort=False) # treats all rows with the same sender as a group
     # create summary per sender account
     sender_stats = sender_grp.agg(
@@ -94,12 +106,18 @@ def add_account_features(df: pd.DataFrame) -> pd.DataFrame:
         _sender_unique_countries=("Receiver_bank_location", "nunique"),
     ).reset_index()
 
+    sender_stats["sender_tx_count"] = sender_stats["_sender_transaction_count"]
     sender_stats["sender_fan_out_ratio"] = (sender_stats["_sender_unique_receivers"] / sender_stats["_sender_transaction_count"])
-    
     sender_stats["sender_amount_cv"] = (sender_stats["_sender_amount_std"] / sender_stats["_sender_amount_mean"]).fillna(0)
     sender_stats["sender_unique_receiver_countries"] = sender_stats["_sender_unique_countries"]
 
-    sender_stats = sender_stats[["Sender_account", "sender_fan_out_ratio", "sender_amount_cv", "sender_unique_receiver_countries"]]
+    sender_stats = sender_stats[[
+        "Sender_account",
+        "sender_tx_count",
+        "sender_fan_out_ratio",
+        "sender_amount_cv",
+        "sender_unique_receiver_countries",
+    ]]
     df = df.merge(sender_stats, on="Sender_account", how="left")
 
     # Receiver Groups
