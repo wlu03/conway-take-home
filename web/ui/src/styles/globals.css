@@ -1,0 +1,104 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    /* Dark theme only */
+    --background: 224 71% 4%;
+    --foreground: 210 40% 98%;
+    --card: 224 71% 8%;
+    --card-foreground: 210 40% 98%;
+    --popover: 224 71% 6%;
+    --popover-foreground: 210 40% 98%;
+    --primary: 0 72% 51%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 215 27% 16%;
+    --secondary-foreground: 210 40% 98%;
+    --muted: 215 27% 16%;
+    --muted-foreground: 215 16% 57%;
+    --accent: 215 27% 16%;
+    --accent-foreground: 210 40% 98%;
+    --destructive: 0 72% 51%;
+    --destructive-foreground: 0 0% 100%;
+    --success: 142 70% 45%;
+    --success-foreground: 0 0% 100%;
+    --warning: 38 92% 50%;
+    --warning-foreground: 0 0% 0%;
+    --border: 215 27% 16%;
+    --input: 215 27% 16%;
+    --ring: 0 72% 51%;
+    --radius: 0.625rem;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  html,
+  body,
+  #root {
+    @apply h-full;
+  }
+  body {
+    @apply bg-background text-foreground antialiased;
+    font-family: "Inter", ui-sans-serif, system-ui, -apple-system, sans-serif;
+    font-feature-settings: "cv11", "ss01", "ss03";
+  }
+  .tnum,
+  td,
+  th,
+  .num {
+    font-variant-numeric: tabular-nums;
+    font-feature-settings: "tnum";
+  }
+  /* Focus visible rings */
+  :focus-visible {
+    @apply outline-none ring-2 ring-ring ring-offset-2 ring-offset-background;
+  }
+  /* Custom scrollbars */
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  ::-webkit-scrollbar-track {
+    background: hsl(224 71% 4%);
+  }
+  ::-webkit-scrollbar-thumb {
+    background: hsl(215 27% 16%);
+    border-radius: 8px;
+    border: 2px solid hsl(224 71% 4%);
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: hsl(215 27% 22%);
+  }
+}
+
+@layer utilities {
+  .text-balance {
+    text-wrap: balance;
+  }
+  .glow-primary {
+    box-shadow: 0 0 40px -8px hsl(0 72% 51% / 0.4);
+  }
+}
+
+/* Reduce motion */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+  svg *,
+  svg animate,
+  svg animateTransform,
+  svg animateMotion {
+    animation: none !important;
+    transition: none !important;
+  }
+}
