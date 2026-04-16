@@ -1,0 +1,266 @@
+{
+  "meta": {
+    "csv_path": "/Users/wesleylu/Desktop/fraud-detection/data/transactions_with_labels.csv",
+    "sample_size_requested": 500000,
+    "n_rows": 489394,
+    "n_positives": 9873,
+    "positive_rate": 0.020173929390225463,
+    "threshold_pct": 1.0,
+    "if_params": {
+      "contamination": 0.01,
+      "max_samples": 256,
+      "n_estimators": 100,
+      "random_state": 42,
+      "n_jobs": -1
+    },
+    "top_typologies": [
+      "Structuring",
+      "Cash_Withdrawal",
+      "Deposit-Send",
+      "Smurfing",
+      "Layered_Fan_In",
+      "Layered_Fan_Out",
+      "Stacked Bipartite",
+      "Behavioural_Change_1",
+      "Bipartite",
+      "Cycle"
+    ],
+    "total_seconds": 42.34671688079834
+  },
+  "ablations": {
+    "baseline_tx": {
+      "features": [
+        "log_amount",
+        "is_currency_conversion",
+        "any_high_risk",
+        "just_below_10k",
+        "below_10k_margin"
+      ],
+      "n_features": 5,
+      "n_rows": 489394,
+      "n_positives": 9873,
+      "n_flagged": 5053,
+      "n_true_positives": 458,
+      "precision": 0.09063922422323373,
+      "recall": 0.04638914210473007,
+      "f1": 0.0613694224838078,
+      "roc_auc": 0.6541145435390976,
+      "fit_seconds": 4.536231756210327,
+      "typology_recall": {
+        "Structuring": {
+          "n_positives": 1870,
+          "n_caught": 17,
+          "recall": 0.00909090909090909
+        },
+        "Cash_Withdrawal": {
+          "n_positives": 1334,
+          "n_caught": 273,
+          "recall": 0.20464767616191903
+        },
+        "Deposit-Send": {
+          "n_positives": 945,
+          "n_caught": 19,
+          "recall": 0.020105820105820106
+        },
+        "Smurfing": {
+          "n_positives": 932,
+          "n_caught": 0,
+          "recall": 0.0
+        },
+        "Layered_Fan_In": {
+          "n_positives": 656,
+          "n_caught": 13,
+          "recall": 0.019817073170731708
+        },
+        "Layered_Fan_Out": {
+          "n_positives": 529,
+          "n_caught": 9,
+          "recall": 0.017013232514177693
+        },
+        "Stacked Bipartite": {
+          "n_positives": 506,
+          "n_caught": 13,
+          "recall": 0.025691699604743084
+        },
+        "Behavioural_Change_1": {
+          "n_positives": 394,
+          "n_caught": 7,
+          "recall": 0.017766497461928935
+        },
+        "Bipartite": {
+          "n_positives": 383,
+          "n_caught": 11,
+          "recall": 0.028720626631853787
+        },
+        "Cycle": {
+          "n_positives": 382,
+          "n_caught": 9,
+          "recall": 0.02356020942408377
+        }
+      },
+      "description": "Transaction-level features only"
+    },
+    "tx_plus_account": {
+      "features": [
+        "log_amount",
+        "is_currency_conversion",
+        "any_high_risk",
+        "just_below_10k",
+        "below_10k_margin",
+        "sender_tx_count",
+        "sender_fan_out_ratio",
+        "sender_amount_cv",
+        "sender_unique_receiver_countries",
+        "receiver_fan_in_ratio",
+        "time_since_last_tx_hours"
+      ],
+      "n_features": 11,
+      "n_rows": 489394,
+      "n_positives": 9873,
+      "n_flagged": 4894,
+      "n_true_positives": 1225,
+      "precision": 0.2503064977523498,
+      "recall": 0.12407576217968196,
+      "f1": 0.16591047606104528,
+      "roc_auc": 0.7467998918354924,
+      "fit_seconds": 4.36285400390625,
+      "typology_recall": {
+        "Structuring": {
+          "n_positives": 1870,
+          "n_caught": 33,
+          "recall": 0.01764705882352941
+        },
+        "Cash_Withdrawal": {
+          "n_positives": 1334,
+          "n_caught": 587,
+          "recall": 0.44002998500749624
+        },
+        "Deposit-Send": {
+          "n_positives": 945,
+          "n_caught": 75,
+          "recall": 0.07936507936507936
+        },
+        "Smurfing": {
+          "n_positives": 932,
+          "n_caught": 4,
+          "recall": 0.004291845493562232
+        },
+        "Layered_Fan_In": {
+          "n_positives": 656,
+          "n_caught": 16,
+          "recall": 0.024390243902439025
+        },
+        "Layered_Fan_Out": {
+          "n_positives": 529,
+          "n_caught": 6,
+          "recall": 0.011342155009451797
+        },
+        "Stacked Bipartite": {
+          "n_positives": 506,
+          "n_caught": 10,
+          "recall": 0.019762845849802372
+        },
+        "Behavioural_Change_1": {
+          "n_positives": 394,
+          "n_caught": 194,
+          "recall": 0.49238578680203043
+        },
+        "Bipartite": {
+          "n_positives": 383,
+          "n_caught": 12,
+          "recall": 0.031331592689295036
+        },
+        "Cycle": {
+          "n_positives": 382,
+          "n_caught": 13,
+          "recall": 0.034031413612565446
+        }
+      },
+      "description": "Transaction + account-level features"
+    },
+    "full": {
+      "features": [
+        "log_amount",
+        "is_currency_conversion",
+        "any_high_risk",
+        "just_below_10k",
+        "below_10k_margin",
+        "sender_tx_count",
+        "sender_fan_out_ratio",
+        "sender_amount_cv",
+        "sender_unique_receiver_countries",
+        "receiver_fan_in_ratio",
+        "time_since_last_tx_hours",
+        "in_any_cycle",
+        "min_cycle_len",
+        "scatter_source_count",
+        "gather_target_count",
+        "scatter_gather_score",
+        "shared_counterparty_count"
+      ],
+      "n_features": 17,
+      "n_rows": 489394,
+      "n_positives": 9873,
+      "n_flagged": 4894,
+      "n_true_positives": 627,
+      "precision": 0.12811606048222313,
+      "recall": 0.06350653296870253,
+      "f1": 0.08491907631837585,
+      "roc_auc": 0.7033163057842678,
+      "fit_seconds": 3.1220767498016357,
+      "typology_recall": {
+        "Structuring": {
+          "n_positives": 1870,
+          "n_caught": 0,
+          "recall": 0.0
+        },
+        "Cash_Withdrawal": {
+          "n_positives": 1334,
+          "n_caught": 0,
+          "recall": 0.0
+        },
+        "Deposit-Send": {
+          "n_positives": 945,
+          "n_caught": 1,
+          "recall": 0.0010582010582010583
+        },
+        "Smurfing": {
+          "n_positives": 932,
+          "n_caught": 0,
+          "recall": 0.0
+        },
+        "Layered_Fan_In": {
+          "n_positives": 656,
+          "n_caught": 9,
+          "recall": 0.013719512195121951
+        },
+        "Layered_Fan_Out": {
+          "n_positives": 529,
+          "n_caught": 12,
+          "recall": 0.022684310018903593
+        },
+        "Stacked Bipartite": {
+          "n_positives": 506,
+          "n_caught": 13,
+          "recall": 0.025691699604743084
+        },
+        "Behavioural_Change_1": {
+          "n_positives": 394,
+          "n_caught": 275,
+          "recall": 0.6979695431472082
+        },
+        "Bipartite": {
+          "n_positives": 383,
+          "n_caught": 0,
+          "recall": 0.0
+        },
+        "Cycle": {
+          "n_positives": 382,
+          "n_caught": 0,
+          "recall": 0.0
+        }
+      },
+      "description": "Transaction + account + graph features"
+    }
+  }
+}

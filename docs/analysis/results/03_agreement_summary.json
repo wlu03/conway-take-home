@@ -1,0 +1,31 @@
+{
+  "thresholds_top1pct": {
+    "IF": 0.6173145493416806,
+    "MAD": NaN,
+    "MCD": 0.0005672266583404529
+  },
+  "flagged_counts": {
+    "IF": 95049,
+    "MAD": 0,
+    "MCD": 95049
+  },
+  "flagged_by_all_three": 0,
+  "flagged_by_any": 163933,
+  "only_if": 68884,
+  "only_mad": 0,
+  "only_mcd": 68884,
+  "exactly_two": 26165,
+  "all_three_precision": 0.0,
+  "only_if_precision": 0.0287730096974624,
+  "only_mad_precision": 0.0,
+  "only_mcd_precision": 0.0010016839904767435,
+  "any_precision": 0.014664527581389959,
+  "total_positives": 9873,
+  "recall_by_flagger": {
+    "IF": 0.2365035956649448,
+    "MAD": 0.0,
+    "MCD": 0.04274283399169452
+  },
+  "recall_all_three": 0.0,
+  "recall_any": 0.24349235288159626
+}
