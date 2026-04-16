@@ -27,6 +27,7 @@
           <a href="#ablation">Ablation</a>
           <a href="#positioning">Positioning</a>
           <a href="#discussion">Discussion</a>
+          <a href="#expansion">Crypto Expansion</a>
           <a href="#references">References</a>
         </div>
       </nav>
@@ -1248,6 +1249,437 @@
       </section>
 
       <!-- ============================================================ -->
+      <section id="expansion">
+        <h2>10. Future Work: Cryptocurrency Whale Detection and Scam/Fraud Detection</h2>
+
+        <p>
+          The MacroBase pipeline we have built operates on fiat transaction
+          data with known sender/receiver identities and regulated reporting
+          thresholds. Cryptocurrency markets share the same fundamental
+          detection challenges (extreme class imbalance, adversarial
+          adaptation, multi hop laundering) but add three new dimensions:
+          <strong>pseudonymous wallet identities</strong> that must be
+          clustered before any account level feature can be computed,
+          <strong>publicly observable on chain data</strong> that enables
+          real time scoring without institutional data sharing agreements,
+          and <strong>sub minute transaction finality</strong> that demands
+          streaming pipelines rather than batch. This section outlines how
+          the existing architecture extends to two high value crypto
+          detection problems: whale manipulation and scam/fraud detection.
+        </p>
+
+        <h3>10.1 Whale detection as anomaly scoring</h3>
+        <p>
+          A crypto "whale" is a wallet (or cluster of wallets) that holds
+          enough of a token's supply to move its price unilaterally. In
+          August 2025, a single Bitcoin whale's sale of 24,000 BTC ($2.7
+          billion) triggered a flash crash and $500 million in liquidations,
+          but traders using AI based blockchain monitoring tools detected
+          the accumulation pattern hours before the sell off
+          (<a href="https://www.ainvest.com/news/real-time-whale-tracking-crypto-alerts-signal-major-market-move-2601/">AInvest, 2025</a>).
+          The detection problem maps directly onto our pipeline:
+        </p>
+
+        <table>
+          <thead>
+            <tr><th>Current pipeline stage</th><th>Crypto whale adaptation</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Transaction level features</td>
+              <td>
+                <code>log_value_usd</code>, <code>gas_price_ratio</code>
+                (gas price relative to network median),
+                <code>is_large_transfer</code> (value above the 99.9th
+                percentile of the token's 30 day volume),
+                <code>block_position</code> (priority fee signaling urgency).
+              </td>
+            </tr>
+            <tr>
+              <td>Account level features</td>
+              <td>
+                <code>wallet_age_days</code>,
+                <code>unique_counterparties_30d</code>,
+                <code>inflow_outflow_ratio</code>,
+                <code>token_concentration_hhi</code>
+                (Herfindahl index of token holdings across a wallet's
+                portfolio; high HHI implies single asset concentration,
+                a whale signal).
+              </td>
+            </tr>
+            <tr>
+              <td>Graph level features</td>
+              <td>
+                <code>wallet_cluster_size</code> (number of addresses
+                linked to the same entity via common input heuristic or
+                behavioral clustering),
+                <code>mixer_hop_count</code> (shortest path to a known
+                mixer/tumbler address),
+                <code>exchange_deposit_fan_in</code> (fan in ratio to
+                exchange hot wallets, a pre liquidation accumulation signal).
+              </td>
+            </tr>
+            <tr>
+              <td>Scoring (Isolation Forest)</td>
+              <td>
+                Same IF architecture, trained on normal wallet behavior.
+                Whales are outliers in the feature space because their
+                holding size, transaction cadence, and counterparty network
+                are structurally different from retail wallets.
+              </td>
+            </tr>
+            <tr>
+              <td>Explanation (FP-Growth risk ratios)</td>
+              <td>
+                Risk ratio predicates over whale flagged transactions
+                could surface patterns like "large ETH transfer from a
+                wallet cluster of 50+ addresses to Binance hot wallet
+                within 10 minutes of a governance vote" at risk ratios
+                far above the baseline. These are directly actionable for
+                compliance teams and market surveillance desks.
+              </td>
+            </tr>
+          </tbody>
+        </table>
+
+        <p>
+          Recent work by
+          <a href="https://www.mdpi.com/2073-431X/14/7/247">MDPI Computers
+          (2025)</a> surveys 250 papers on ML for blockchain anomaly
+          detection and finds that LSTM models with on chain features
+          (hash rate fluctuations, whale transactions) achieve F1 of 0.703,
+          with SHAP attributing over 33% of predictive power to whale
+          transaction features alone. Our Isolation Forest approach, which
+          is non parametric and handles multimodal inlier distributions, is
+          well suited here because the "normal" crypto transaction
+          population is even more multimodal than SAML-D (DeFi yield
+          farming, NFT trading, staking rewards, and simple transfers all
+          live in the same data stream).
+        </p>
+
+        <h3>10.2 Scam and fraud detection</h3>
+        <p>
+          Cryptocurrency fraud comes in distinct typologies, each of which
+          maps to a specific detection strategy.
+        </p>
+
+        <h4>Rug pulls</h4>
+        <p>
+          A rug pull occurs when a project developer attracts investment
+          into a new token, inflates its value, then drains the liquidity
+          pool and disappears. Detection features include
+          <code>liquidity_pool_age</code>,
+          <code>dev_wallet_token_pct</code> (fraction of supply held by
+          deployer wallet cluster),
+          <code>contract_has_mint_function</code>,
+          <code>contract_renounced_ownership</code>,
+          and <code>social_mention_velocity</code>. A 2025 study in
+          <em>ScienceDirect</em>
+          (<a href="https://www.sciencedirect.com/science/article/pii/S2096720925000028">link</a>)
+          shows that rug pulls can be detected from on chain transaction
+          data alone with high accuracy by analyzing the token's
+          transaction graph structure before the pull event occurs.
+        </p>
+
+        <h4>Pump and dump</h4>
+        <p>
+          Pump and dump schemes unfold in under 15 minutes, which demands
+          streaming detection rather than batch. Two recent systems lead
+          the field:
+        </p>
+        <ul>
+          <li>
+            <strong>PUMPWATCHER</strong>
+            (<a href="https://arxiv.org/pdf/2510.00836">arXiv 2510.00836</a>)
+            builds temporal transaction graphs and applies GNNs with
+            contrastive learning to detect pump and dump activity by
+            modeling trading behavior within short time windows.
+          </li>
+          <li>
+            <strong>Perseus</strong>
+            (<a href="https://arxiv.org/html/2503.01686v1">arXiv 2503.01686</a>)
+            ingests real time data from Telegram groups and cryptocurrency
+            exchanges, constructs temporal attributed graphs, and uses GNNs
+            to trace the masterminds behind coordinated pumps. In a
+            Poloniex case study, it correctly identified the target coin
+            among the top 5 from 50 random coins in 56% of pump and dump
+            events.
+          </li>
+        </ul>
+        <p>
+          Our pipeline's FP-Growth explanation stage is a natural fit for
+          the post hoc analysis of pump and dump events: risk ratios over
+          predicates like "token age under 7 days, buy volume spike over
+          10x median, Telegram mention count over 500 in 1 hour" would
+          give compliance teams a concise typology summary rather than
+          individual alert fatigue.
+        </p>
+
+        <h4>Mixer and tumbler laundering</h4>
+        <p>
+          Crypto mixers (Tornado Cash, Wasabi Wallet, CoinJoin protocols)
+          break the on chain link between sender and receiver. Chainalysis
+          monitors over 1,800 services using hundreds of clustering
+          heuristics
+          (<a href="https://www.chainalysis.com/">chainalysis.com</a>),
+          and Elliptic tracks 97% of crypto market cap with graph
+          analytics and ML for wallet clustering
+          (<a href="https://www.elliptic.co/">elliptic.co</a>). Our
+          graph feature layer (cycle detection, scatter-gather scoring,
+          shared counterparty count) directly models the topological
+          signatures that mixers produce: many small inputs funneled
+          to an intermediary, then fanned out to many small outputs.
+          The <code>scatter_gather_score</code> feature, which performed
+          well on SAML-D Scatter-Gather typologies (32.8% recall), would
+          translate to mixer intermediary detection with minimal
+          adaptation. The gap is in <strong>temporal windowing</strong>:
+          mixers delay outputs by hours or days, so a rolling window
+          feature (which our pipeline currently lacks for the fiat case
+          as well) becomes essential.
+        </p>
+
+        <h4>Ponzi and pyramid schemes</h4>
+        <p>
+          On chain Ponzi detection relies on structural features of the
+          transaction graph: early investors receive payouts funded by
+          later investors, creating a characteristic "deep funnel" graph
+          topology where in degree concentrates at a small set of
+          addresses while out degree fans broadly. Our
+          <code>receiver_fan_in_ratio</code> and
+          <code>sender_fan_out_ratio</code> features already encode this
+          exact topological signal. Extending them with a time weighted
+          variant (<code>fan_in_ratio_7d</code>,
+          <code>fan_in_ratio_30d</code>) would let the Isolation Forest
+          separate Ponzi addresses from legitimate high activity wallets
+          like exchange hot wallets.
+        </p>
+
+        <h3>10.3 Technical architecture for the crypto extension</h3>
+        <p>
+          Extending the pipeline to cryptocurrency requires changes at the
+          ingestion, feature, and explanation layers. Scoring and
+          classification can remain largely unchanged.
+        </p>
+
+        <h4>Ingestion layer</h4>
+        <p>
+          Replace the CSV ingestion with a streaming blockchain data source.
+          Options include:
+        </p>
+        <ul>
+          <li>
+            <strong>Ethereum JSON-RPC</strong> via a local or hosted node
+            (Infura, Alchemy). Provides block by block transaction data
+            including internal transactions, token transfers (ERC-20 events),
+            and smart contract interactions.
+          </li>
+          <li>
+            <strong>The Graph Protocol</strong> (subgraphs). Pre-indexed,
+            query friendly access to on chain data via GraphQL. Good for
+            token specific analysis (e.g., all Uniswap swaps involving a
+            target token).
+          </li>
+          <li>
+            <strong>Dune Analytics or Flipside</strong> for batch analysis
+            with SQL on historical data. The pipeline's current batch
+            architecture maps cleanly here.
+          </li>
+        </ul>
+
+        <h4>Wallet clustering (new preprocessing layer)</h4>
+        <p>
+          Before account level features can be computed, pseudonymous
+          addresses must be grouped into wallet clusters. The standard
+          heuristic for Bitcoin is the <em>common input ownership</em>
+          assumption: if two addresses appear as inputs in the same
+          transaction, they are controlled by the same entity. For
+          Ethereum, clustering uses contract deployment linkage, gas
+          station patterns, and behavioral similarity (transaction timing,
+          counterparty overlap). This clustering step produces an
+          <code>entity_id</code> column that replaces
+          <code>Sender_account</code> and <code>Receiver_account</code>
+          in the downstream pipeline.
+        </p>
+
+        <h4>Feature engineering adaptations</h4>
+        <p>
+          The three tier feature hierarchy translates with the following
+          additions:
+        </p>
+        <ul>
+          <li>
+            <strong>Transaction level:</strong> add
+            <code>gas_price_ratio</code>,
+            <code>is_contract_interaction</code>,
+            <code>token_transfer_count</code> (batch transfers are a
+            mixer signal),
+            <code>value_vs_30d_median</code>.
+          </li>
+          <li>
+            <strong>Account level:</strong> add
+            <code>wallet_cluster_size</code>,
+            <code>entity_age_days</code>,
+            <code>rolling_7d_tx_count</code>,
+            <code>rolling_7d_unique_counterparties</code>,
+            <code>token_concentration_hhi</code>.
+          </li>
+          <li>
+            <strong>Graph level:</strong> replace the pandas self join
+            cycle detection with a streaming approximate approach
+            (e.g., bloom filter on recent edge hashes for O(1) cycle
+            checks). Add <code>mixer_proximity</code> (shortest path to
+            a known mixer contract) and
+            <code>exchange_deposit_latency</code> (time from last large
+            inflow to exchange deposit, a liquidation signal).
+          </li>
+          <li>
+            <strong>New tier: smart contract features</strong> (for rug
+            pull and exploit detection). <code>contract_age</code>,
+            <code>has_selfdestruct</code>,
+            <code>has_unverified_source</code>,
+            <code>owner_can_mint</code>,
+            <code>liquidity_lock_duration</code>.
+          </li>
+        </ul>
+
+        <h4>Explanation layer adaptations</h4>
+        <p>
+          The FP-Growth explanation stage maps directly. Attribute columns
+          become:
+          <code>chain</code> (Ethereum, BSC, Polygon, ...),
+          <code>token_symbol</code>,
+          <code>is_contract_interaction</code>,
+          <code>mixer_proximity_bin</code>,
+          <code>wallet_age_bin</code>,
+          <code>is_whale</code>.
+          Risk ratio predicates would surface patterns like "whale cluster
+          on BSC, token under 30 days old, liquidity pool under $50K,
+          developer holds over 40% of supply" at concentrated risk ratios.
+        </p>
+
+        <h3>10.4 Phased research roadmap</h3>
+
+        <div class="table-wrap">
+          <table class="results-table">
+            <caption>Table 7. Phased expansion roadmap from fiat AML to cryptocurrency whale and fraud detection.</caption>
+            <thead>
+              <tr>
+                <th>Phase</th>
+                <th>Scope</th>
+                <th>New capabilities</th>
+                <th>Estimated effort</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><strong>Phase 1</strong><br/>Rolling windows</td>
+                <td>Still fiat (SAML-D)</td>
+                <td>
+                  Add 7 day and 30 day rolling window features
+                  (<code>rolling_tx_count</code>,
+                  <code>rolling_same_amount_count</code>).
+                  Expected to push Smurfing recall from 0% to 20%+
+                  per the SMoTeF result.
+                </td>
+                <td>2 weeks</td>
+              </tr>
+              <tr>
+                <td><strong>Phase 2</strong><br/>Bitcoin whale detection</td>
+                <td>Bitcoin (UTXO model)</td>
+                <td>
+                  Ingest from a Bitcoin full node or public API.
+                  Implement common input wallet clustering.
+                  Map existing account and graph features onto
+                  clustered entities. Whale scoring via IF on the
+                  extended feature set.
+                </td>
+                <td>4 weeks</td>
+              </tr>
+              <tr>
+                <td><strong>Phase 3</strong><br/>Ethereum scam detection</td>
+                <td>Ethereum (account model)</td>
+                <td>
+                  Add smart contract features (mint authority,
+                  liquidity lock, selfdestruct).
+                  Implement rug pull and pump and dump specific
+                  feature tiers.
+                  Streaming ingestion from JSON-RPC or The Graph.
+                  Sub 15 minute alert latency for pump and dump.
+                </td>
+                <td>6 weeks</td>
+              </tr>
+              <tr>
+                <td><strong>Phase 4</strong><br/>Cross chain graph</td>
+                <td>Multi chain (ETH, BSC, Polygon, Arbitrum)</td>
+                <td>
+                  Bridge transaction tracking.
+                  Cross chain wallet clustering via deposit/withdraw
+                  timing correlation.
+                  Unified graph feature layer across chains.
+                  Mixer proximity scoring against known contracts
+                  (Tornado Cash, Railgun, CoinJoin).
+                </td>
+                <td>8 weeks</td>
+              </tr>
+              <tr>
+                <td><strong>Phase 5</strong><br/>GNN upgrade</td>
+                <td>All chains</td>
+                <td>
+                  Replace pandas graph approximation with a GNN
+                  layer (PNA or GIN+EU per Altman et al., NeurIPS
+                  2023). Train on the Elliptic Bitcoin dataset as a
+                  validation benchmark (target: match ChronoWave-GNN
+                  F1 0.9799 with semi-supervised pretraining on the
+                  existing unsupervised scored data).
+                </td>
+                <td>10 weeks</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <h3>10.5 Open research questions</h3>
+        <ol>
+          <li>
+            <strong>How does wallet clustering quality affect downstream
+            detection?</strong> If clustering is imperfect (addresses
+            assigned to the wrong entity), every account level feature is
+            contaminated. Quantifying the sensitivity of IF scoring to
+            clustering error rate would determine whether a "good enough"
+            heuristic suffices or whether a learned clustering model is
+            required.
+          </li>
+          <li>
+            <strong>Can the MacroBase explanation framework handle streaming
+            data?</strong> Bailis et al. designed MacroBase for fast data
+            streams, but our FP-Growth implementation is batch. Adapting
+            the explanation stage to sliding window risk ratios over a
+            1 hour or 24 hour window would enable real time alert
+            generation for pump and dump events.
+          </li>
+          <li>
+            <strong>Is Isolation Forest the right scorer for sub minute
+            crypto data?</strong> IF is batch oriented (fit once, score
+            many). A streaming anomaly detector like Half Space Trees or
+            an online autoencoder may be more appropriate for the 15
+            minute pump and dump detection window. The tradeoff is
+            interpretability: IF's tree paths are directly explainable,
+            while neural detectors require post hoc SHAP.
+          </li>
+          <li>
+            <strong>What is the false positive cost in crypto vs fiat?</strong>
+            In fiat AML, a false positive triggers a human SAR review
+            ($50 to $500 per case). In crypto compliance, a false positive
+            can freeze a wallet on an exchange, which has immediate
+            financial impact on the user. The precision/recall tradeoff
+            may therefore need to be calibrated very differently,
+            favoring precision over recall in a way that the current
+            top 1% cutoff does not.
+          </li>
+        </ol>
+      </section>
+
+      <!-- ============================================================ -->
       <section id="references">
         <h2>References</h2>
         <ol class="references">
@@ -1285,6 +1717,43 @@
           <li>
             Financial Action Task Force (2026). <em>Jurisdictions under
             Increased Monitoring.</em> February 2026 update.
+          </li>
+          <li>
+            Altman, E. et al. (2023). <em>Realistic Synthetic Financial
+            Transactions for Anti-Money Laundering Models.</em> NeurIPS
+            2023 Datasets and Benchmarks.
+            <a href="https://arxiv.org/abs/2306.16424">arXiv:2306.16424</a>.
+          </li>
+          <li>
+            <em>Machine Learning for Anomaly Detection in Blockchain: A
+            Critical Analysis, Empirical Validation, and Future Outlook.</em>
+            MDPI Computers, 2025.
+            <a href="https://www.mdpi.com/2073-431X/14/7/247">Link</a>.
+          </li>
+          <li>
+            <em>Perseus: Tracing the Masterminds Behind Cryptocurrency
+            Pump-and-Dump Schemes.</em> arXiv:2503.01686, 2025.
+            <a href="https://arxiv.org/html/2503.01686v1">Link</a>.
+          </li>
+          <li>
+            <em>Improving Cryptocurrency Pump-and-Dump Detection
+            (PUMPWATCHER).</em> arXiv:2510.00836, 2025.
+            <a href="https://arxiv.org/pdf/2510.00836">Link</a>.
+          </li>
+          <li>
+            <em>SMoTeF: Smurf money laundering detection using temporal
+            order and flow analysis.</em> Applied Intelligence, 2024.
+            <a href="https://link.springer.com/article/10.1007/s10489-024-05545-4">Springer</a>.
+          </li>
+          <li>
+            <em>GARG-AML against Smurfing: A Scalable and Interpretable
+            Approach.</em> arXiv:2506.04292, 2025.
+            <a href="https://arxiv.org/pdf/2506.04292">Link</a>.
+          </li>
+          <li>
+            <em>Rug pull detection on decentralized exchange using
+            transaction data.</em> ScienceDirect, 2025.
+            <a href="https://www.sciencedirect.com/science/article/pii/S2096720925000028">Link</a>.
           </li>
         </ol>
       </section>
