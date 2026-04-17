@@ -375,6 +375,70 @@ footer p {
 
 /* ---------- Responsive ---------- */
 
+/* ---------- Print ---------- */
+
+@media print {
+  .site-nav,
+  footer {
+    display: none;
+  }
+
+  body {
+    font-size: 11pt;
+    line-height: 1.5;
+    color: #000;
+  }
+
+  .wrap {
+    max-width: 100%;
+    padding: 0;
+  }
+
+  .site-header {
+    border-bottom: 2px solid #000;
+    padding-top: 0;
+  }
+
+  h2 {
+    page-break-after: avoid;
+    border-bottom-color: #000;
+  }
+
+  h3, h4 {
+    page-break-after: avoid;
+  }
+
+  table, figure {
+    page-break-inside: avoid;
+  }
+
+  a {
+    color: #000;
+    text-decoration: underline;
+  }
+
+  a[href]::after {
+    content: " (" attr(href) ")";
+    font-size: 0.8em;
+    color: #555;
+    word-break: break-all;
+  }
+
+  .site-nav a[href]::after,
+  .nav-wrap a[href]::after {
+    content: none;
+  }
+
+  figure {
+    background: #fff;
+    border: 1px solid #ccc;
+  }
+
+  .results-table tr.primary {
+    background: #eee !important;
+  }
+}
+
 @media (max-width: 640px) {
   body {
     font-size: 16px;
