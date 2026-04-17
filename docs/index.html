@@ -27,7 +27,7 @@
           <a href="#ablation">Ablation</a>
           <a href="#positioning">Positioning</a>
           <a href="#discussion">Discussion</a>
-          <a href="#expansion">Crypto Expansion</a>
+          <a href="#expansion">Polymarket</a>
           <a href="#references">References</a>
         </div>
       </nav>
@@ -1250,318 +1250,292 @@
 
       <!-- ============================================================ -->
       <section id="expansion">
-        <h2>10. Future Work: Cryptocurrency Whale Detection and Scam/Fraud Detection</h2>
+        <h2>10. Future Work: Polymarket Insider Detection and Prediction Market Fraud</h2>
 
         <p>
-          The MacroBase pipeline we have built operates on fiat transaction
-          data with known sender/receiver identities and regulated reporting
-          thresholds. Cryptocurrency markets share the same fundamental
-          detection challenges (extreme class imbalance, adversarial
-          adaptation, multi hop laundering) but add three new dimensions:
-          <strong>pseudonymous wallet identities</strong> that must be
-          clustered before any account level feature can be computed,
-          <strong>publicly observable on chain data</strong> that enables
-          real time scoring without institutional data sharing agreements,
-          and <strong>sub minute transaction finality</strong> that demands
-          streaming pipelines rather than batch. This section outlines how
-          the existing architecture extends to two high value crypto
-          detection problems: whale manipulation and scam/fraud detection.
+          Prediction markets such as <strong>Polymarket</strong> are an
+          emerging surveillance target where the MacroBase pipeline maps
+          with striking directness. Polymarket operates a hybrid
+          decentralized central limit order book (CLOB) on the Polygon
+          blockchain, settling binary outcome contracts in USDC.e. Every
+          bet, cancellation, and resolution is recorded on chain, and each
+          user interacts through a deterministic proxy wallet whose full
+          history is publicly queryable
+          (<a href="https://docs.polymarket.com/developers/CLOB/introduction">Polymarket CLOB Docs</a>).
+          This transparency is a double edged sword: it makes insider
+          trading <em>detectable</em> in a way that traditional equity
+          markets cannot match, but it also means that detection must keep
+          pace with adversaries who can see the same data.
         </p>
 
-        <h3>10.1 Whale detection as anomaly scoring</h3>
         <p>
-          A crypto "whale" is a wallet (or cluster of wallets) that holds
-          enough of a token's supply to move its price unilaterally. In
-          August 2025, a single Bitcoin whale's sale of 24,000 BTC ($2.7
-          billion) triggered a flash crash and $500 million in liquidations,
-          but traders using AI based blockchain monitoring tools detected
-          the accumulation pattern hours before the sell off
-          (<a href="https://www.ainvest.com/news/real-time-whale-tracking-crypto-alerts-signal-major-market-move-2601/">AInvest, 2025</a>).
-          The detection problem maps directly onto our pipeline:
+          The urgency is real. In 2025 and 2026, a series of high profile
+          insider trading incidents demonstrated both the scale of the
+          problem and the feasibility of on chain detection:
+        </p>
+
+        <div class="table-wrap">
+          <table class="results-table">
+            <caption>Table 7. Documented insider trading incidents on Polymarket (2025 and 2026).</caption>
+            <thead>
+              <tr>
+                <th>Date</th>
+                <th>Event</th>
+                <th>Signal</th>
+                <th>Profit</th>
+                <th>Outcome</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>Oct 2025</td>
+                <td>Nobel Peace Prize (Machado)</td>
+                <td>Odds moved from $0.08 to >$0.70 eleven hours before announcement</td>
+                <td>~1,000% return</td>
+                <td>Flagged by on chain analysts</td>
+              </tr>
+              <tr>
+                <td>Feb 2026</td>
+                <td>U.S. strikes on Tehran</td>
+                <td>Six accounts bet hours before missiles hit; one turned $61K into $493K (821% return)</td>
+                <td>$1.2M collective</td>
+                <td>Israeli Air Force reservist indicted
+                  (<a href="https://www.cnn.com/2026/03/30/politics/prediction-markets-justice-department">CNN</a>)</td>
+              </tr>
+              <tr>
+                <td>Apr 2026</td>
+                <td>Iran ceasefire announcement</td>
+                <td>50 newly created accounts placed bets minutes before Trump posted on Truth Social</td>
+                <td>Under investigation</td>
+                <td>DOJ SDNY exploring charges
+                  (<a href="https://fortune.com/2026/04/02/crypto-prediction-markets-insider-trading-congress-gambling-act-bad-idea/">Fortune</a>)</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <h3>10.1 How the MacroBase pipeline maps to Polymarket</h3>
+        <p>
+          The pipeline's three tier feature hierarchy translates to
+          prediction market insider detection with one structural
+          advantage: because Polymarket settles on Polygon, every bet
+          is a timestamped on chain event with a known proxy wallet, a
+          known market, a known direction (YES/NO), and a known size in
+          USDC. This is <em>richer</em> than the SAML-D row schema because
+          it includes an observable outcome (market resolution) that lets
+          us define "informed" versus "uninformed" trading ex post.
         </p>
 
         <table>
           <thead>
-            <tr><th>Current pipeline stage</th><th>Crypto whale adaptation</th></tr>
+            <tr><th>Current pipeline stage</th><th>Polymarket insider adaptation</th></tr>
           </thead>
           <tbody>
             <tr>
               <td>Transaction level features</td>
               <td>
-                <code>log_value_usd</code>, <code>gas_price_ratio</code>
-                (gas price relative to network median),
-                <code>is_large_transfer</code> (value above the 99.9th
-                percentile of the token's 30 day volume),
-                <code>block_position</code> (priority fee signaling urgency).
+                <code>bet_size_usdc</code>,
+                <code>odds_at_entry</code> (probability at the time the
+                bet was placed),
+                <code>time_to_resolution_minutes</code> (how close to the
+                market resolution event),
+                <code>direction</code> (YES or NO),
+                <code>payout_multiple</code>
+                (<code>1 / odds_at_entry</code> for a winning bet; the
+                Tehran incident showed an 821% return, which implies odds
+                well below $0.12 at entry).
               </td>
             </tr>
             <tr>
               <td>Account level features</td>
               <td>
-                <code>wallet_age_days</code>,
-                <code>unique_counterparties_30d</code>,
-                <code>inflow_outflow_ratio</code>,
-                <code>token_concentration_hhi</code>
-                (Herfindahl index of token holdings across a wallet's
-                portfolio; high HHI implies single asset concentration,
-                a whale signal).
+                <code>proxy_wallet_age_days</code>,
+                <code>total_markets_traded</code>,
+                <code>historical_win_rate</code>,
+                <code>pre_resolution_trade_ratio</code> (fraction of bets
+                placed within 60 minutes of resolution),
+                <code>avg_bet_size</code>,
+                <code>max_single_bet</code>,
+                <code>unique_categories</code> (politics, sports, crypto,
+                etc.).
               </td>
             </tr>
             <tr>
               <td>Graph level features</td>
               <td>
-                <code>wallet_cluster_size</code> (number of addresses
-                linked to the same entity via common input heuristic or
-                behavioral clustering),
-                <code>mixer_hop_count</code> (shortest path to a known
-                mixer/tumbler address),
-                <code>exchange_deposit_fan_in</code> (fan in ratio to
-                exchange hot wallets, a pre liquidation accumulation signal).
+                <code>usdc_funding_cluster_size</code> (number of proxy
+                wallets funded from the same source address on Polygon;
+                the
+                <a href="https://github.com/suislanchez/polymarket-insider-detector">polymarket-insider-detector</a>
+                project uses this exact approach),
+                <code>co_bet_cluster_count</code> (wallets that bet on
+                the same side of the same market within a short time
+                window, indicating coordinated action),
+                <code>shared_funder_count</code> (analogous to our
+                <code>shared_counterparty_count</code> in the AML
+                pipeline).
               </td>
             </tr>
             <tr>
               <td>Scoring (Isolation Forest)</td>
               <td>
-                Same IF architecture, trained on normal wallet behavior.
-                Whales are outliers in the feature space because their
-                holding size, transaction cadence, and counterparty network
-                are structurally different from retail wallets.
+                Train IF on normal betting behavior. Insiders are
+                outliers because their win rate, timing, and bet size
+                profile is structurally different from retail bettors.
+                The existing GitHub tool uses a simpler binomial p value
+                test (flag wallets with p &lt; 0.001); IF would
+                generalize this to the full multivariate feature space.
               </td>
             </tr>
             <tr>
               <td>Explanation (FP-Growth risk ratios)</td>
               <td>
-                Risk ratio predicates over whale flagged transactions
-                could surface patterns like "large ETH transfer from a
-                wallet cluster of 50+ addresses to Binance hot wallet
-                within 10 minutes of a governance vote" at risk ratios
-                far above the baseline. These are directly actionable for
-                compliance teams and market surveillance desks.
+                Risk ratio predicates over flagged bets: "bet placed
+                within 10 minutes of resolution AND wallet age under
+                24 hours AND bet size above $25K AND winning side" at
+                risk ratios far above the population baseline. This
+                produces the kind of pattern summary that the DOJ SDNY
+                would need to build a case.
               </td>
             </tr>
           </tbody>
         </table>
 
+        <h3>10.2 Insider trading typologies on prediction markets</h3>
         <p>
-          Recent work by
-          <a href="https://www.mdpi.com/2073-431X/14/7/247">MDPI Computers
-          (2025)</a> surveys 250 papers on ML for blockchain anomaly
-          detection and finds that LSTM models with on chain features
-          (hash rate fluctuations, whale transactions) achieve F1 of 0.703,
-          with SHAP attributing over 33% of predictive power to whale
-          transaction features alone. Our Isolation Forest approach, which
-          is non parametric and handles multimodal inlier distributions, is
-          well suited here because the "normal" crypto transaction
-          population is even more multimodal than SAML-D (DeFi yield
-          farming, NFT trading, staking rewards, and simple transfers all
-          live in the same data stream).
+          Prediction market insider trading comes in recognizable
+          typologies, analogous to the AML typologies in SAML-D:
         </p>
 
-        <h3>10.2 Scam and fraud detection</h3>
+        <h4>Pre announcement sniping</h4>
         <p>
-          Cryptocurrency fraud comes in distinct typologies, each of which
-          maps to a specific detection strategy.
+          The actor has advance knowledge of a future event (military
+          action, policy announcement, prize winner) and places a large
+          directional bet before the information becomes public. The Nobel
+          Peace Prize and Tehran incidents are textbook examples. Detection
+          features: <code>time_to_resolution_minutes</code> (very small),
+          <code>bet_size_usdc</code> (very large),
+          <code>payout_multiple</code> (very high), and
+          <code>proxy_wallet_age_days</code> (often a new wallet created
+          specifically for the trade).
         </p>
 
-        <h4>Rug pulls</h4>
+        <h4>Sybil coordinated betting</h4>
         <p>
-          A rug pull occurs when a project developer attracts investment
-          into a new token, inflates its value, then drains the liquidity
-          pool and disappears. Detection features include
-          <code>liquidity_pool_age</code>,
-          <code>dev_wallet_token_pct</code> (fraction of supply held by
-          deployer wallet cluster),
-          <code>contract_has_mint_function</code>,
-          <code>contract_renounced_ownership</code>,
-          and <code>social_mention_velocity</code>. A 2025 study in
-          <em>ScienceDirect</em>
-          (<a href="https://www.sciencedirect.com/science/article/pii/S2096720925000028">link</a>)
-          shows that rug pulls can be detected from on chain transaction
-          data alone with high accuracy by analyzing the token's
-          transaction graph structure before the pull event occurs.
+          The April 2026 ceasefire incident involved 50 newly created
+          accounts placing bets in a short window, each individually
+          below any single account threshold but collectively moving the
+          market. This is the prediction market analog of smurfing. The
+          graph level <code>usdc_funding_cluster_size</code> and
+          <code>co_bet_cluster_count</code> features detect it by
+          tracing the on chain USDC funding paths and bet timing
+          correlation.
         </p>
 
-        <h4>Pump and dump</h4>
+        <h4>Outcome manipulation</h4>
         <p>
-          Pump and dump schemes unfold in under 15 minutes, which demands
-          streaming detection rather than batch. Two recent systems lead
-          the field:
+          An actor who can <em>influence</em> the outcome (a politician
+          who can announce a policy, a judge who can issue a ruling) bets
+          on the outcome they intend to cause. Polymarket's 2025 Market
+          Integrity rules explicitly ban this
+          (<a href="https://www.xmr.vegas/polymarket-insider-trading-crackdown-new-rules-explained/">XMR Vegas</a>).
+          Detection is harder because the bet itself may look normal; the
+          signal is in the <em>identity</em> of the bettor, not the
+          trade pattern. Wallet clustering linked to known public figures
+          (via exchange KYC deposit tracing or ENS domain registration)
+          becomes the key feature.
+        </p>
+
+        <h4>Wash trading and market manipulation</h4>
+        <p>
+          Fortune reported in October 2024 that Polymarket's Trump
+          election market was "rife with fake wash trading" based on
+          analysis by academic researchers
+          (<a href="https://fortune.com/crypto/2024/10/30/polymarket-trump-election-crypto-wash-trading-researchers/">Fortune</a>).
+          A single French national operated four accounts totaling $45M in
+          Trump bets. Our cycle detection features
+          (<code>in_2hop_cycle</code>) can detect wash trades directly:
+          USDC flowing from wallet A to wallet B's bet, then outcome
+          tokens from B back to A, forms a detectable 2 hop cycle on
+          the Polygon transaction graph.
+        </p>
+
+        <h3>10.3 Existing detection tools and prior art</h3>
+        <p>
+          Two systems are currently operational:
         </p>
         <ul>
           <li>
-            <strong>PUMPWATCHER</strong>
-            (<a href="https://arxiv.org/pdf/2510.00836">arXiv 2510.00836</a>)
-            builds temporal transaction graphs and applies GNNs with
-            contrastive learning to detect pump and dump activity by
-            modeling trading behavior within short time windows.
+            <strong>polymarket-insider-detector</strong>
+            (<a href="https://github.com/suislanchez/polymarket-insider-detector">GitHub</a>).
+            An open source Next.js tool that computes four statistical
+            signals per wallet: binomial p value on win rate (flag at
+            p &lt; 0.001), pre resolution timing analysis (flag trades
+            within 1 to 10 minutes of resolution), whale thresholds ($5K+
+            bets, "mega whale" at $25K+), and USDC funding source tracing
+            on Polygon for Sybil detection. Produces a composite risk
+            score from 0 to 10 with Low/Medium/High/Critical tiers.
           </li>
           <li>
-            <strong>Perseus</strong>
-            (<a href="https://arxiv.org/html/2503.01686v1">arXiv 2503.01686</a>)
-            ingests real time data from Telegram groups and cryptocurrency
-            exchanges, constructs temporal attributed graphs, and uses GNNs
-            to trace the masterminds behind coordinated pumps. In a
-            Poloniex case study, it correctly identified the target coin
-            among the top 5 from 50 random coins in 56% of pump and dump
-            events.
+            <strong>Kalshi's "Poirot" system</strong>
+            (<a href="https://www.theblock.co/post/394807/kalshi-polymarket-insider-trading-curbs">The Block</a>).
+            Kalshi operates as a CFTC designated contract market and runs
+            a proprietary pattern recognition tool named Poirot that has
+            flagged over 200 investigations and multiple account freezes.
+            No public technical details have been released.
           </li>
         </ul>
         <p>
-          Our pipeline's FP-Growth explanation stage is a natural fit for
-          the post hoc analysis of pump and dump events: risk ratios over
-          predicates like "token age under 7 days, buy volume spike over
-          10x median, Telegram mention count over 500 in 1 hour" would
-          give compliance teams a concise typology summary rather than
-          individual alert fatigue.
+          Our MacroBase pipeline would sit between these two: more
+          statistically principled than the p value heuristic (which
+          ignores multivariate feature interactions) and more transparent
+          than a proprietary black box. The FP-Growth explanation layer
+          is the differentiator: it produces human readable predicate
+          combinations that could serve as evidence in a DOJ investigation,
+          not just a scalar risk score.
         </p>
 
-        <h4>Mixer and tumbler laundering</h4>
+        <h3>10.4 Technical architecture for Polymarket ingestion</h3>
         <p>
-          Crypto mixers (Tornado Cash, Wasabi Wallet, CoinJoin protocols)
-          break the on chain link between sender and receiver. Chainalysis
-          monitors over 1,800 services using hundreds of clustering
-          heuristics
-          (<a href="https://www.chainalysis.com/">chainalysis.com</a>),
-          and Elliptic tracks 97% of crypto market cap with graph
-          analytics and ML for wallet clustering
-          (<a href="https://www.elliptic.co/">elliptic.co</a>). Our
-          graph feature layer (cycle detection, scatter-gather scoring,
-          shared counterparty count) directly models the topological
-          signatures that mixers produce: many small inputs funneled
-          to an intermediary, then fanned out to many small outputs.
-          The <code>scatter_gather_score</code> feature, which performed
-          well on SAML-D Scatter-Gather typologies (32.8% recall), would
-          translate to mixer intermediary detection with minimal
-          adaptation. The gap is in <strong>temporal windowing</strong>:
-          mixers delay outputs by hours or days, so a rolling window
-          feature (which our pipeline currently lacks for the fiat case
-          as well) becomes essential.
-        </p>
-
-        <h4>Ponzi and pyramid schemes</h4>
-        <p>
-          On chain Ponzi detection relies on structural features of the
-          transaction graph: early investors receive payouts funded by
-          later investors, creating a characteristic "deep funnel" graph
-          topology where in degree concentrates at a small set of
-          addresses while out degree fans broadly. Our
-          <code>receiver_fan_in_ratio</code> and
-          <code>sender_fan_out_ratio</code> features already encode this
-          exact topological signal. Extending them with a time weighted
-          variant (<code>fan_in_ratio_7d</code>,
-          <code>fan_in_ratio_30d</code>) would let the Isolation Forest
-          separate Ponzi addresses from legitimate high activity wallets
-          like exchange hot wallets.
-        </p>
-
-        <h3>10.3 Technical architecture for the crypto extension</h3>
-        <p>
-          Extending the pipeline to cryptocurrency requires changes at the
-          ingestion, feature, and explanation layers. Scoring and
-          classification can remain largely unchanged.
-        </p>
-
-        <h4>Ingestion layer</h4>
-        <p>
-          Replace the CSV ingestion with a streaming blockchain data source.
-          Options include:
+          Polymarket exposes three APIs that together provide every data
+          point the pipeline needs
+          (<a href="https://chainstack.com/polymarket-api-for-developers/">Chainstack guide</a>):
         </p>
         <ul>
           <li>
-            <strong>Ethereum JSON-RPC</strong> via a local or hosted node
-            (Infura, Alchemy). Provides block by block transaction data
-            including internal transactions, token transfers (ERC-20 events),
-            and smart contract interactions.
+            <strong>Gamma API</strong> (public, no auth). Market
+            discovery: condition IDs, descriptions, categories, resolution
+            timestamps, and current probabilities. This is the equivalent
+            of our CSV's metadata columns.
           </li>
           <li>
-            <strong>The Graph Protocol</strong> (subgraphs). Pre-indexed,
-            query friendly access to on chain data via GraphQL. Good for
-            token specific analysis (e.g., all Uniswap swaps involving a
-            target token).
+            <strong>CLOB API</strong> (authenticated for trading,
+            read only for order book). Real time and historical order book
+            depth, fills, and cancellations. Each fill record includes
+            the proxy wallet address, direction, price, size, and
+            timestamp. This is the core transaction stream.
           </li>
           <li>
-            <strong>Dune Analytics or Flipside</strong> for batch analysis
-            with SQL on historical data. The pipeline's current batch
-            architecture maps cleanly here.
+            <strong>Polygon RPC</strong>. On chain settlement records,
+            USDC.e transfers, and proxy wallet deployment transactions.
+            This is where funding source tracing and wallet clustering
+            happen.
           </li>
         </ul>
-
-        <h4>Wallet clustering (new preprocessing layer)</h4>
         <p>
-          Before account level features can be computed, pseudonymous
-          addresses must be grouped into wallet clusters. The standard
-          heuristic for Bitcoin is the <em>common input ownership</em>
-          assumption: if two addresses appear as inputs in the same
-          transaction, they are controlled by the same entity. For
-          Ethereum, clustering uses contract deployment linkage, gas
-          station patterns, and behavioral similarity (transaction timing,
-          counterparty overlap). This clustering step produces an
-          <code>entity_id</code> column that replaces
-          <code>Sender_account</code> and <code>Receiver_account</code>
-          in the downstream pipeline.
+          The ingestion layer would poll the CLOB API for fills (or
+          subscribe via WebSocket for real time), enrich each fill with
+          Gamma metadata (market category, resolution status, current
+          odds), and trace the proxy wallet's USDC funding chain via
+          Polygon RPC. The resulting row schema maps directly onto the
+          existing pipeline's <code>load_data()</code> interface.
         </p>
 
-        <h4>Feature engineering adaptations</h4>
-        <p>
-          The three tier feature hierarchy translates with the following
-          additions:
-        </p>
-        <ul>
-          <li>
-            <strong>Transaction level:</strong> add
-            <code>gas_price_ratio</code>,
-            <code>is_contract_interaction</code>,
-            <code>token_transfer_count</code> (batch transfers are a
-            mixer signal),
-            <code>value_vs_30d_median</code>.
-          </li>
-          <li>
-            <strong>Account level:</strong> add
-            <code>wallet_cluster_size</code>,
-            <code>entity_age_days</code>,
-            <code>rolling_7d_tx_count</code>,
-            <code>rolling_7d_unique_counterparties</code>,
-            <code>token_concentration_hhi</code>.
-          </li>
-          <li>
-            <strong>Graph level:</strong> replace the pandas self join
-            cycle detection with a streaming approximate approach
-            (e.g., bloom filter on recent edge hashes for O(1) cycle
-            checks). Add <code>mixer_proximity</code> (shortest path to
-            a known mixer contract) and
-            <code>exchange_deposit_latency</code> (time from last large
-            inflow to exchange deposit, a liquidation signal).
-          </li>
-          <li>
-            <strong>New tier: smart contract features</strong> (for rug
-            pull and exploit detection). <code>contract_age</code>,
-            <code>has_selfdestruct</code>,
-            <code>has_unverified_source</code>,
-            <code>owner_can_mint</code>,
-            <code>liquidity_lock_duration</code>.
-          </li>
-        </ul>
-
-        <h4>Explanation layer adaptations</h4>
-        <p>
-          The FP-Growth explanation stage maps directly. Attribute columns
-          become:
-          <code>chain</code> (Ethereum, BSC, Polygon, ...),
-          <code>token_symbol</code>,
-          <code>is_contract_interaction</code>,
-          <code>mixer_proximity_bin</code>,
-          <code>wallet_age_bin</code>,
-          <code>is_whale</code>.
-          Risk ratio predicates would surface patterns like "whale cluster
-          on BSC, token under 30 days old, liquidity pool under $50K,
-          developer holds over 40% of supply" at concentrated risk ratios.
-        </p>
-
-        <h3>10.4 Phased research roadmap</h3>
+        <h3>10.5 Phased research roadmap</h3>
 
         <div class="table-wrap">
           <table class="results-table">
-            <caption>Table 7. Phased expansion roadmap from fiat AML to cryptocurrency whale and fraud detection.</caption>
+            <caption>Table 7. Phased expansion roadmap from fiat AML to Polymarket insider detection and prediction market fraud.</caption>
             <thead>
               <tr>
                 <th>Phase</th>
@@ -1572,109 +1546,120 @@
             </thead>
             <tbody>
               <tr>
-                <td><strong>Phase 1</strong><br/>Rolling windows</td>
-                <td>Still fiat (SAML-D)</td>
+                <td><strong>Phase 1</strong><br/>Historical backtest</td>
+                <td>Polymarket (batch)</td>
                 <td>
-                  Add 7 day and 30 day rolling window features
-                  (<code>rolling_tx_count</code>,
-                  <code>rolling_same_amount_count</code>).
-                  Expected to push Smurfing recall from 0% to 20%+
-                  per the SMoTeF result.
+                  Ingest historical CLOB fills via the Gamma API.
+                  Build the three tier feature set (bet level, wallet
+                  level, funding graph level).
+                  Train IF on normal betting behavior.
+                  Backtest against the known insider incidents
+                  (Nobel, Tehran, ceasefire) as ground truth positives.
+                  Evaluate precision and recall at top 0.1% to 1%.
                 </td>
-                <td>2 weeks</td>
+                <td>3 weeks</td>
               </tr>
               <tr>
-                <td><strong>Phase 2</strong><br/>Bitcoin whale detection</td>
-                <td>Bitcoin (UTXO model)</td>
+                <td><strong>Phase 2</strong><br/>Wallet clustering</td>
+                <td>Polymarket (batch)</td>
                 <td>
-                  Ingest from a Bitcoin full node or public API.
-                  Implement common input wallet clustering.
-                  Map existing account and graph features onto
-                  clustered entities. Whale scoring via IF on the
-                  extended feature set.
+                  Trace USDC funding sources on Polygon for all active
+                  proxy wallets.
+                  Cluster wallets by shared funding address, timing
+                  correlation, and co bet patterns.
+                  Add <code>cluster_size</code>,
+                  <code>shared_funder_count</code>, and
+                  <code>co_bet_cluster_count</code> as graph features.
+                  Re-evaluate: does clustering close the Sybil gap?
+                </td>
+                <td>3 weeks</td>
+              </tr>
+              <tr>
+                <td><strong>Phase 3</strong><br/>Streaming detection</td>
+                <td>Polymarket (real time)</td>
+                <td>
+                  Subscribe to the CLOB WebSocket for live fills.
+                  Score each fill against the pre-trained IF in under
+                  1 second.
+                  Trigger FP-Growth explanation when a market's
+                  aggregated insider risk score crosses a threshold.
+                  Push alerts via webhook (Slack, Telegram, email).
                 </td>
                 <td>4 weeks</td>
               </tr>
               <tr>
-                <td><strong>Phase 3</strong><br/>Ethereum scam detection</td>
-                <td>Ethereum (account model)</td>
+                <td><strong>Phase 4</strong><br/>Multi platform</td>
+                <td>Polymarket + Kalshi + Metaculus</td>
                 <td>
-                  Add smart contract features (mint authority,
-                  liquidity lock, selfdestruct).
-                  Implement rug pull and pump and dump specific
-                  feature tiers.
-                  Streaming ingestion from JSON-RPC or The Graph.
-                  Sub 15 minute alert latency for pump and dump.
+                  Normalize schemas across prediction market platforms.
+                  Cross platform identity linking (same user on
+                  Polymarket and Kalshi detected via deposit timing
+                  and bet category overlap).
+                  Unified graph feature layer.
                 </td>
                 <td>6 weeks</td>
               </tr>
               <tr>
-                <td><strong>Phase 4</strong><br/>Cross chain graph</td>
-                <td>Multi chain (ETH, BSC, Polygon, Arbitrum)</td>
+                <td><strong>Phase 5</strong><br/>Regulatory tooling</td>
+                <td>CFTC and DOJ interface</td>
                 <td>
-                  Bridge transaction tracking.
-                  Cross chain wallet clustering via deposit/withdraw
-                  timing correlation.
-                  Unified graph feature layer across chains.
-                  Mixer proximity scoring against known contracts
-                  (Tornado Cash, Railgun, CoinJoin).
+                  Export flagged wallet clusters with FP-Growth
+                  explanation summaries in a format suitable for
+                  regulatory filing (analogous to SAR reports in
+                  the fiat world).
+                  Add timeline reconstruction: for a given incident
+                  (e.g., "Tehran strikes"), produce a chronological
+                  narrative of which wallets bet, when, how much,
+                  and how they are connected.
                 </td>
-                <td>8 weeks</td>
-              </tr>
-              <tr>
-                <td><strong>Phase 5</strong><br/>GNN upgrade</td>
-                <td>All chains</td>
-                <td>
-                  Replace pandas graph approximation with a GNN
-                  layer (PNA or GIN+EU per Altman et al., NeurIPS
-                  2023). Train on the Elliptic Bitcoin dataset as a
-                  validation benchmark (target: match ChronoWave-GNN
-                  F1 0.9799 with semi-supervised pretraining on the
-                  existing unsupervised scored data).
-                </td>
-                <td>10 weeks</td>
+                <td>4 weeks</td>
               </tr>
             </tbody>
           </table>
         </div>
 
-        <h3>10.5 Open research questions</h3>
+        <h3>10.6 Open research questions</h3>
         <ol>
           <li>
-            <strong>How does wallet clustering quality affect downstream
-            detection?</strong> If clustering is imperfect (addresses
-            assigned to the wrong entity), every account level feature is
-            contaminated. Quantifying the sensitivity of IF scoring to
-            clustering error rate would determine whether a "good enough"
-            heuristic suffices or whether a learned clustering model is
-            required.
+            <strong>What constitutes "informed" versus "lucky" on a
+            prediction market?</strong> The existing insider-detector
+            GitHub tool flags wallets with win rates above 80% at
+            p &lt; 0.001, but prediction markets reward genuine
+            expertise. A sophisticated political analyst who consistently
+            beats the market is not an insider. Separating skill from
+            information requires conditioning on market category,
+            question difficulty, and timing relative to public
+            information flow.
           </li>
           <li>
-            <strong>Can the MacroBase explanation framework handle streaming
-            data?</strong> Bailis et al. designed MacroBase for fast data
-            streams, but our FP-Growth implementation is batch. Adapting
-            the explanation stage to sliding window risk ratios over a
-            1 hour or 24 hour window would enable real time alert
-            generation for pump and dump events.
+            <strong>Can FP-Growth explanations serve as legal
+            evidence?</strong> The DOJ SDNY is actively exploring
+            whether prediction market bets violate insider trading
+            laws. A risk ratio explanation like "wallets matching this
+            predicate combination are 40x more concentrated in the
+            pre resolution window than baseline" is more rigorous than
+            a scalar p value, but it has not been tested in court.
+            Collaborating with a legal scholar on the evidentiary
+            standard would be a high value next step.
           </li>
           <li>
-            <strong>Is Isolation Forest the right scorer for sub minute
-            crypto data?</strong> IF is batch oriented (fit once, score
-            many). A streaming anomaly detector like Half Space Trees or
-            an online autoencoder may be more appropriate for the 15
-            minute pump and dump detection window. The tradeoff is
-            interpretability: IF's tree paths are directly explainable,
-            while neural detectors require post hoc SHAP.
+            <strong>How fast does the adversary adapt?</strong> The
+            progression from single whale accounts (2024 election) to
+            50 coordinated Sybil accounts (April 2026 ceasefire)
+            happened in 18 months. A streaming detection pipeline
+            must be retrained or at least recalibrated on a monthly
+            cadence to keep pace with adversarial evolution.
           </li>
           <li>
-            <strong>What is the false positive cost in crypto vs fiat?</strong>
-            In fiat AML, a false positive triggers a human SAR review
-            ($50 to $500 per case). In crypto compliance, a false positive
-            can freeze a wallet on an exchange, which has immediate
-            financial impact on the user. The precision/recall tradeoff
-            may therefore need to be calibrated very differently,
-            favoring precision over recall in a way that the current
-            top 1% cutoff does not.
+            <strong>Is Isolation Forest the right scorer for prediction
+            markets?</strong> The inlier distribution on Polymarket is
+            simpler than SAML-D (most bets are small, long dated, and
+            lose), which means the multimodality advantage of IF is
+            less important. A gradient boosted model (XGBoost or
+            LightGBM) trained on the known insider incidents as
+            positives might outperform IF once a small labeled set
+            is available. The MacroBase architecture supports swapping
+            the scorer without changing the explanation layer.
           </li>
         </ol>
       </section>
@@ -1719,41 +1704,44 @@
             Increased Monitoring.</em> February 2026 update.
           </li>
           <li>
-            Altman, E. et al. (2023). <em>Realistic Synthetic Financial
-            Transactions for Anti-Money Laundering Models.</em> NeurIPS
-            2023 Datasets and Benchmarks.
-            <a href="https://arxiv.org/abs/2306.16424">arXiv:2306.16424</a>.
+            <em>Prediction markets caught insider traders in real time.
+            Congress wants to shut them down anyway.</em> Fortune,
+            April 2 2026.
+            <a href="https://fortune.com/2026/04/02/crypto-prediction-markets-insider-trading-congress-gambling-act-bad-idea/">Link</a>.
           </li>
           <li>
-            <em>Machine Learning for Anomaly Detection in Blockchain: A
-            Critical Analysis, Empirical Validation, and Future Outlook.</em>
-            MDPI Computers, 2025.
-            <a href="https://www.mdpi.com/2073-431X/14/7/247">Link</a>.
+            <em>Federal prosecutors exploring whether prediction market
+            bets trip insider trading laws.</em> CNN, March 30 2026.
+            <a href="https://www.cnn.com/2026/03/30/politics/prediction-markets-justice-department">Link</a>.
           </li>
           <li>
-            <em>Perseus: Tracing the Masterminds Behind Cryptocurrency
-            Pump-and-Dump Schemes.</em> arXiv:2503.01686, 2025.
-            <a href="https://arxiv.org/html/2503.01686v1">Link</a>.
+            Korosec, D. and Weisenthal, J.
+            <em>From Iran to Taylor Swift: Informed Trading in Prediction
+            Markets.</em> Harvard Law School Forum on Corporate Governance,
+            March 25 2026.
+            <a href="https://corpgov.law.harvard.edu/2026/03/25/from-iran-to-taylor-swift-informed-trading-in-prediction-markets/">Link</a>.
           </li>
           <li>
-            <em>Improving Cryptocurrency Pump-and-Dump Detection
-            (PUMPWATCHER).</em> arXiv:2510.00836, 2025.
-            <a href="https://arxiv.org/pdf/2510.00836">Link</a>.
+            suislanchez. <em>polymarket-insider-detector: Statistical
+            analysis tool for detecting insider trading patterns on
+            Polymarket.</em> GitHub, 2025.
+            <a href="https://github.com/suislanchez/polymarket-insider-detector">Link</a>.
           </li>
           <li>
-            <em>SMoTeF: Smurf money laundering detection using temporal
-            order and flow analysis.</em> Applied Intelligence, 2024.
-            <a href="https://link.springer.com/article/10.1007/s10489-024-05545-4">Springer</a>.
+            <em>Kalshi, Polymarket tighten insider trading controls amid
+            Senate scrutiny.</em> The Block, 2025.
+            <a href="https://www.theblock.co/post/394807/kalshi-polymarket-insider-trading-curbs">Link</a>.
           </li>
           <li>
-            <em>GARG-AML against Smurfing: A Scalable and Interpretable
-            Approach.</em> arXiv:2506.04292, 2025.
-            <a href="https://arxiv.org/pdf/2506.04292">Link</a>.
+            <em>Polymarket CLOB Introduction.</em> Polymarket Developer
+            Documentation.
+            <a href="https://docs.polymarket.com/developers/CLOB/introduction">Link</a>.
           </li>
           <li>
-            <em>Rug pull detection on decentralized exchange using
-            transaction data.</em> ScienceDirect, 2025.
-            <a href="https://www.sciencedirect.com/science/article/pii/S2096720925000028">Link</a>.
+            <em>Election betting site Polymarket gives Trump a 67% chance
+            but is rife with fake wash trading, researchers say.</em>
+            Fortune, October 30 2024.
+            <a href="https://fortune.com/crypto/2024/10/30/polymarket-trump-election-crypto-wash-trading-researchers/">Link</a>.
           </li>
         </ol>
       </section>
